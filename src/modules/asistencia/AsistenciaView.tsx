@@ -320,6 +320,14 @@ function DayTable({
   );
 }
 
+function nombreCorto(nombreCompleto: string): string {
+  const partes = nombreCompleto.trim().split(' ');
+  if (partes.length <= 1) return nombreCompleto;
+  const apellidos = partes.slice(0, Math.min(2, partes.length - 1)).join(' ');
+  const inicialNombre = partes[partes.length - 1]?.[0] ?? '';
+  return `${apellidos} ${inicialNombre}.`;
+}
+
 function DayRow({ fila, idx, busy, onToggle }: {
   fila: FilaAsistencia; idx: number; busy: boolean; onToggle: () => void;
 }) {
@@ -329,7 +337,10 @@ function DayRow({ fila, idx, busy, onToggle }: {
 
   return (
     <tr className={`border-b border-surface-muted/50 ${idx % 2 !== 0 ? 'bg-slate-50' : ''}`}>
-      <td className="px-4 py-2.5 text-slate-900 text-xs leading-tight">{fila.nombreCompleto}</td>
+      <td className={`sticky left-0 z-10 px-2 py-2.5 text-xs leading-tight border-r border-surface-muted/20 ${idx % 2 !== 0 ? 'bg-slate-50' : 'bg-white'}`}>
+        <span className="sm:hidden text-slate-900">{nombreCorto(fila.nombreCompleto)}</span>
+        <span className="hidden sm:inline text-slate-900">{fila.nombreCompleto}</span>
+      </td>
       <td className="text-center px-2 py-1.5">
         <EstadoBtn estado={fila.estadoHoy} disabled={busy} onClick={onToggle} />
       </td>
@@ -400,8 +411,9 @@ function MesGrid({ grilla, busy, onToggle }: {
             return (
               <tr key={fila.matriculaId} className={`border-b border-surface-muted/50 ${i % 2 !== 0 ? 'bg-slate-50' : ''}`}>
                 {/* Nombre — sticky */}
-                <td className={`sticky left-0 z-10 ${bgBase} px-4 py-2 text-slate-900 text-xs border-r border-surface-muted/30 max-w-[200px] truncate`}>
-                  {fila.nombreCompleto}
+                <td className={`sticky left-0 z-10 ${bgBase} px-2 py-2 text-xs border-r border-surface-muted/30 min-w-[90px] sm:min-w-[160px]`}>
+                  <span className="sm:hidden text-slate-900">{nombreCorto(fila.nombreCompleto)}</span>
+                  <span className="hidden sm:inline text-slate-900 truncate block max-w-[155px]">{fila.nombreCompleto}</span>
                 </td>
 
                 {/* Celdas de cada fecha */}
