@@ -416,8 +416,8 @@ export async function sembrarDatos(): Promise<void> {
 
     // Áreas
     await db.areas.bulkAdd([
-      { id: IDS.AREA_INFORMATICA, nombre: 'Tecnología e Informática', tipo: 'BASICA' as const, created_at: NOW, updated_at: NOW },
-      { id: IDS.AREA_MATEMATICAS, nombre: 'Matemáticas',              tipo: 'BASICA' as const, created_at: NOW, updated_at: NOW },
+      { id: IDS.AREA_INFORMATICA, nombre: 'Tecnología e Informática', tipo: 'COMPLEMENTARIA' as const, created_at: NOW, updated_at: NOW },
+      { id: IDS.AREA_MATEMATICAS, nombre: 'Matemáticas',              tipo: 'BASICA'          as const, created_at: NOW, updated_at: NOW },
     ]);
 
     // Asignaturas
