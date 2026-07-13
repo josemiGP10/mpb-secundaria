@@ -1,0 +1,464 @@
+// ============================================================
+//  SEED DATA — Diario Pedagógico MPB Secundaria 2026
+//  Fuente: Planilla oficial de matrículas 2026
+// ============================================================
+
+import { v4 as uuid } from 'uuid';
+import { db } from './database';
+
+export const IDS = {
+  AREA_INFORMATICA:  'area-info-001',
+  AREA_MATEMATICAS:  'area-mate-001',
+  ASIG_INFORMATICA:  'asig-info-001',
+  ASIG_MATEMATICAS:  'asig-mate-001',
+  G_6A:       'grp-6a-2026',
+  G_6B:       'grp-6b-2026',
+  G_7A:       'grp-7a-2026',
+  G_7B:       'grp-7b-2026',
+  G_8A:       'grp-8a-2026',
+  G_9A:       'grp-9a-2026',
+  G_9B:       'grp-9b-2026',
+  G_10A:      'grp-10a-2026',
+  G_11A:      'grp-11a-2026',
+  G_MEF67:    'grp-mef67-2026',
+  G_MEF89:    'grp-mef89-2026',
+  G_MEF1011:  'grp-mef1011-2026',
+};
+
+const NOW = '2026-01-01T00:00:00.000Z';
+
+type Estudiante = {
+  id: string; tipo_doc: string; doc: string;
+  apellido1: string; apellido2: string;
+  nombre1: string; nombre2: string;
+  fecha_nacimiento: string; created_at: string; updated_at: string;
+};
+
+function e(doc: string, td: string, a1: string, a2: string, n1: string, n2 = ''): Estudiante {
+  return { id: uuid(), tipo_doc: td, doc, apellido1: a1, apellido2: a2,
+           nombre1: n1, nombre2: n2, fecha_nacimiento: '2010-01-01', created_at: NOW, updated_at: NOW };
+}
+
+// ── Estudiantes por grupo ──────────────────────────────────
+
+const G6A: Estudiante[] = [
+  e('1119712996','T','BARROS ELLES','','KEINER JUNIOR DO SANTOS'),
+  e('1123413201','T','CASTRILLO LINDO','','MARIA GABRIELA'),
+  e('1123414041','T','CASTRILLO MENA','','KATINA MICHELL'),
+  e('1123414022','T','CHACON MENDOZA','','LINDA LUCIA'),
+  e('1123414345','T','CURVELO REDONDO','','SAMUIEL DE JESUS'),
+  e('1124552057','T','GONZALEZ ROSADO','','MARGELIS JOSEFINA'),
+  e('1123414132','T','MADERA FONTALVO','','DAVIAINIS YAIRETH'),
+  e('1123413295','T','MAESTRE ARIAS','','YHEIKON RAFAEL'),
+  e('1123412962','T','MENA CALDERA','','JELEN VANESSA'),
+  e('1029864745','T','MENA REDONDO','','THANIA SOFIA'),
+  e('1123413400','T','MORA MENA','','LAURA DANIELA'),
+  e('1119404576','T','OÑATE REDONDO','','ANTONY JAVIER'),
+  e('1123414211','T','PIMIENTA OÑATE','','JAVIANNY SHAILITH'),
+  e('1123413903','T','QUINTERO PINTO','','SHAYRETH KAMILA'),
+  e('1029864356','T','REDONDO ARIAS','','DEIGRITH CAMILA'),
+  e('1123413310','T','REDONDO ARIAS','','DIVANNYS KAROLINA'),
+  e('1123413511','T','REDONDO DELUQUE','','ADOLFO JOSE'),
+  e('1043025645','T','REDONDO POLO','','MATHEO YELIT'),
+  e('1123414245','T','REDONDO RIVAS','','SEBASTIAN ANDRES'),
+  e('1123413900','T','REDONDO SUAREZ','','TIAGO JUNIOR'),
+  e('1118851649','T','RODRIGUEZ EPINAYU','','DAINER GREGORIO'),
+  e('1123415288','T','RODRIGUEZ EPINAYU','','KATLIN DARIANIS'),
+];
+
+const G6B: Estudiante[] = [
+  e('1149448052','T','ALBERTO DAZA','','JUAN ACENCIO'),
+  e('1123414091','T','ALBERTO DAZA','','MARIA GENIA'),
+  e('1123413018','T','CASTRILLO MENDOZA','','MIGUEL ANGEL'),
+  e('1123411561','T','CONTRERAS NAVARRO','','IDIANIS MARIA'),
+  e('1029863304','T','ESTRADA PADILLA','','GIRMA ALBERTO'),
+  e('0000000001','T','FERNANDEZ GONZALEZ','','CLAUDIA AURORA'),
+  e('6593216','PPT','GONZALEZ MORALES','','PATRICIA DEL CARMEN'),
+  e('1123411117','T','IRIARTE GONZALEZ','','FABIAN JOSE'),
+  e('1119401223','T','MARQUEZ EPIAYU','','BIENVENDO'),
+  e('1123412251','T','MENDOZA DAZA','','CESAR AUGUSTO'),
+  e('1123411992','T','MOSCOTE FREILE','','YEIRAN DAVID'),
+  e('1123413033','T','MOSCOTE REDONDO','','MILAN ANDRES'),
+  e('1029863203','T','MURGAS VALENCIA','','RIYACKSON ANDRES'),
+  e('1176215721','T','PACHECO MEJIA','','RICHAR DE JESUS'),
+  e('1048581094','T','PEREIRA ELLES','','DANIS YOHANA'),
+  e('1123409328','T','PEREZ TORRES','','JAIRO ANTONIO'),
+  e('1123411897','T','PINTO BARROS','','MARIBEL'),
+  e('1066291613','T','PINTO CHAMUSQUERA','','MISAEL ANDRES'),
+  e('1207463017','T','REDONDO RUIZ','','RAYKAN ANDRES'),
+  e('1123412908','T','RODRIGUEZ ALMA','','HELEN SOFIA'),
+  e('1123412882','T','RODRIGUEZ BOLAÑO','','FISMAN ANDRES'),
+  e('1123412790','T','ROSADO RIVADENEIRA','','DALAT SOFIA'),
+  e('1123413238','T','RUIZ MOSCOTE','','KEIRA SOFIA'),
+  e('1083047721','T','VARGAS QUINTERO','','JOHAN ALEJANDRO'),
+];
+
+const G7A: Estudiante[] = [
+  e('1063967497','T','AREVALO CHARRIS','','YAIRETH ALEJANDRA'),
+  e('7532788','PPT','BARRIOS HERRERA','','KEIVER ALEXANDER'),
+  e('1123413050','T','CASTRILLO CASTILLO','','MAYELIS'),
+  e('1123412829','T','CASTRILLO GUALE','','THAINIS THALIANA'),
+  e('1123412575','T','CASTRILLO MENA','','LUIS FELIPE'),
+  e('1123412327','T','COTES CASTRILLO','','AARON FELIPE'),
+  e('1207463040','T','CURVELO REDONDO','','TATIANA MISHELL'),
+  e('1123412760','T','GONZALEZ YANCE','','SHAILOT SOFIA'),
+  e('1119399426','T','GRANADOS MENA','','ANGEL DE JESUS'),
+  e('1119711561','T','GRANADOS MENA','','MATIAS JOSE'),
+  e('1123411921','T','LOPEZ GUTIERREZ','','LUIS JOSE'),
+  e('1123412392','T','LOPEZ ROSADO','','CELENE YISELL'),
+  e('1123412805','T','MADERA FONTALVO','','DANIEL JOSE'),
+  e('1123412285','T','MENA CHOLES','','ANA LUZ'),
+  e('1118856814','T','MENA ESTRADA','','CHEILI SOFIA'),
+  e('11234102','T','MINDIOLA ARIAS','','MILEISIS MILETH'),
+  e('1123412902','T','MOSCOTE MORALES','','YILMARIS DAVID'),
+  e('1123412300','T','REDONDO QUINTERO','','LIANETH SOFIA'),
+  e('1123410846','T','RUIZ BARRIOS','','ALEJANDRA JOSE'),
+  e('1123412050','T','SARMIENTO REDONDO','','DILAM ZACHIELL'),
+];
+
+const G7B: Estudiante[] = [
+  e('1244481070','T','AREVALO OSORIO','','TASHARE PAOLA'),
+  e('1151192553','T','BARLIZA PUSHAINA','','YAMILETH SARAY'),
+  e('1176215671','T','BARROS ELLES','','MARIA DE LOS ANGELES'),
+  e('1123408693','T','BENITEZ MONSALVE','','ELINSON'),
+  e('1123409207','T','BUELVAS GONZALEZ','','MARIANA MICHEL'),
+  e('1123410665','T','CASTRILLO MOSCOTE','','SAHARA MARIA'),
+  e('1193038192','T','CHOLES ARIAS','','JOEL MOISES'),
+  e('1085111757','T','CUEVA SERPA','','NIDIER ANTONIO'),
+  e('1123409542','T','DELUQUEZ SUAREZ','','YANIRIS YOANELA'),
+  e('6688091','PPT','FERNANDEZ GONZALEZ','','CLAUDIA PAOLA'),
+  e('1080430955','T','GUERRERO RETAMOZO','','BRIANY CAROLINA'),
+  e('1123411904','T','JANDIGUA MOJICA','','KAREN CAROLINA'),
+  e('1123410431','T','LINDO PACHECO','','LUIS MIGUEL'),
+  e('1123410470','T','LINDO SALCEDO','','MATIAS DAVID'),
+  e('1119397073','T','MARQUEZ EPIAYU','','MARIA BELEN'),
+  e('656877','PPT','PALMAR FUENMAYOR','','YUBELKIS NANLLERLI'),
+  e('7205776','PPT','PINTO OSORIO','','DIEGO ARMANDO'),
+  e('1123410453','T','REDONDO MINDIOLA','','JERSON EMMANUEL'),
+  e('1123408984','T','REDONDO QUINTERO','','LIAN DE JESUS'),
+  e('1119403248','T','RIVERA REDONDO','','ANDRES CAMILO'),
+  e('1123411174','T','RODRIGUEZ ALMA','','MARIA CAMILA'),
+  e('1123410263','T','ROMERO ALMAZO','','JHOAN SEBASTIAN'),
+  e('1123408711','T','SABAN VILLAR','','RONNY ALBERTO'),
+  e('1073989967','T','SOTELO MENDOZA','','JOSE DANIEL'),
+  e('6215943','PPT','URRUTIA TORRES','','WILYERLIS ALEJANDRA'),
+  e('1152936493','T','USECHE SANCHEZ','','YEIRIS NINELL'),
+];
+
+const G8A: Estudiante[] = [
+  e('1118845773','T','BARLIZA PUSHAINA','','ERNESTO'),
+  e('1123410074','T','CASTRILLO RODRIGUEZ','','ATALIA ROUS'),
+  e('1123410607','T','COGOLLO ALVAREZ','','LUIS MIGUEL'),
+  e('1123409749','T','COTES FREYLE','','JOSE MIGUEL'),
+  e('1029863307','T','CURVELO CASTRILLO','','LUIS FELIPE'),
+  e('1096763643','T','DELUQUE PEREZ','','YAREISYS YULIETH'),
+  e('1149449437','T','EPIEYU IPUANA','','JOSE ANTONIO'),
+  e('0000000002','T','EPINAYU MORALES','','JOSE MIGUEL'),
+  e('1123416756','T','GIOVANETTY PIMIENTA','','ORIANA DAVID'),
+  e('1042861918','T','GUERRA GUILLOT','','LAURA DANIELA'),
+  e('1123411459','T','GUILLOT GARCIA','','KATRINA THALIN ISABEL'),
+  e('1151461602','T','JUSAYU PUSHAINA','','OMER JOSE'),
+  e('1045750944','T','LARA BRAVO','','LISGREY PAOLA'),
+  e('1123410349','T','LOPEZ ALARZA','','ELIECER ENRIQUE'),
+  e('1123411747','T','MENA MOSCOTE','','ANA LIZ'),
+  e('1123409406','T','MERCADO ALMAZO','','GENESIS JOSE'),
+  e('1123411407','T','MEZA CERPA','','YEIDIS VANESSA'),
+  e('1149448005','T','MOJICA GIL','','GABRIEL'),
+  e('1123411903','T','MOJICA GIL','','LUIS ANGEL'),
+  e('5937752','PPT','MORALES MENDEZ','','ANGERBERT ALBERTO'),
+  e('1123411351','T','MOSCOTE MARTINEZ','','VIDALVIS MILENA'),
+  e('1029863020','T','OÑATE PACHECO','','ISAAC DE JESUS'),
+  e('1123409782','T','OSPINO CARDALES','','YURANIS CAROLINA'),
+  e('1123411327','T','PIMIENTA OÑATE','','DAVIANA MICHELL'),
+  e('1118844157','T','PINTO MINDIOLA','','JESUS MANUEL'),
+  e('1123411741','T','PRIETO ALFONSO','','KENNY ROBERTH'),
+  e('1123414714','T','QUINTERO CALLEJA','','ALFONSO JOSE'),
+  e('1123412028','T','REDONDO BOLAÑO','','SOLIMAR'),
+  e('1123411019','T','REDONDO TORRES','','ANDRES YECITH'),
+  e('1123411715','T','VARELA CHOLES','','SHADYA SHARIT'),
+];
+
+const G9A: Estudiante[] = [
+  e('1067618658','T','AREVALO CHARRIS','','ALEX SANTIAGO'),
+  e('1119398672','T','CALDERON OÑATE','','ALEXA JOHANA'),
+  e('1030245103','T','CAMPO BAQUERO','','NOIDER ENRIQUE'),
+  e('1123410103','T','CANTILLO MENA','','ESLY SADAY'),
+  e('1123409448','T','CARDOZO DANIES','','ALVIERIS YESSY'),
+  e('1123410217','T','CARDOZO PIMIENTA','','YONAIL EDUARDO'),
+  e('1123410218','T','CARDOZO PIMIENTA','','YONAILIS MARIBEL'),
+  e('1123408638','T','CASTRILLO CHOLES','','JAVIER ANDRES'),
+  e('1123409497','T','CASTRILLO REDONDO','','SADAN FELIPE'),
+  e('1119397826','T','CHOLES ARMESTO','','JESUS DAVID'),
+  e('1123410589','T','COTES CASTRILLO','','LUNA SOFIA'),
+  e('1123411110','T','COTES MENA','','CARLOS MIGUEL'),
+  e('1123410527','T','FREYLE PACHECO','','ADRIANA MICHELL'),
+  e('1123411317','T','LOPEZ REDONDO','','JHON JOSE'),
+  e('1123410971','T','MADERA FONTALVO','','YOVIANA YIRETH'),
+  e('1176265540','T','MENGUAL REDONDO','','JAMPIER SANTIAGO'),
+  e('1123411145','T','MORALES REDONDO','','BREYDER ANDRES'),
+  e('1123408989','T','MORALES SUAREZ','','JUAN JOSE'),
+  e('1123409457','T','MOSCOTE MERIÑO','','CARLOS ANDRES'),
+  e('1119399475','T','MOSCOTE OCHOA','','YORLIE CAMILA'),
+  e('1119709576','T','NOGREIRA MOSCOTE','','ALEXA SOFIA'),
+  e('1139325438','T','OBESO MORALES','','HECTOR RAUL'),
+  e('1139325456','T','ORTIZ POLO','','NATALIA ISABEL'),
+  e('1139325722','T','PACHECO FREYLE','','ALETHXA MARIA'),
+  e('1123411662','T','ROSADO RIVADENEIRA','','YIRATH YIRETH'),
+  e('1123410961','T','RUIZ MOSCOTE','','BRIAGNNY YAIDITH'),
+  e('1123408208','T','SUAREZ REDONDO','','LEONEL ENRIQUE'),
+  e('11123410609','T','VALDEZ FERNANDEZ','','MARIA ALEJANDRA'),
+];
+
+const G9B: Estudiante[] = [
+  e('1123411081','T','BAUTISTA GUALE','','ANA MARIA'),
+  e('1123409359','T','BORRERO CARRILLO','','DAZARITH DANIELA'),
+  e('1176215074','T','CANTILLO CARDOZO','','JOHANDRITH MARIANA'),
+  e('1123411523','T','CHOLES MENA','','NICOLL SOFIA'),
+  e('1123410062','T','CHOLES SALAZAR','','LIZ DANIS'),
+  e('1176214749','T','CURVELO REDONDO','','ANTHONY JAVIER'),
+  e('1123408767','T','LOPEZ ROJAS','','CRISMAN RIVALDO'),
+  e('1083556465','T','MADRID CUADRADO','','ANDREA MARCELA'),
+  e('6588985','PPT','MATTOS PIRELA','','ALEJANDRA ISABEL'),
+  e('1123417265','T','MONTERROSA GOMEZ','','JUAN MIGUEL'),
+  e('1176215459','T','MOSCOTE GUILLOT','','MARIA JOSE'),
+  e('1123411806','T','OÑATE MALO','','RAMIRO'),
+  e('108354639','T','PABON ACUÑA','','LUCELIS'),
+  e('1123409254','T','PACHECO MEJIA','','LOANA YISETH'),
+  e('11341762411','T','PALMAR EPINAYU','','DANILO'),
+  e('1083558405','T','PERTUZ OBESO','','GUILLERMO SEGUNDO'),
+  e('1149447730','T','PINTO BARROS','','YOLANDA'),
+  e('1123406635','T','PITRE VANEGAS','','LUIS MARIO ADOLFO'),
+  e('1119709064','T','REDONDO CARRILLO','','YOJHAN RAFAEL'),
+  e('1123410441','T','REDONDO VERDOREZ','','MARIOMAR DE JESUS'),
+  e('1123405940','C','RODRIGUEZ ARIZA','','LUZ ANGELA'),
+  e('1124063375','T','URIANA','','SOFIA ISABEL'),
+  e('1235241107','C','ZARRAGA LOPEZ','','ABRAHAN JOSE'),
+];
+
+const G10A: Estudiante[] = [
+  e('1123408262','T','BAUTISTA JIMENEZ','','JULIETH CAROLINA'),
+  e('1123409768','T','CHOLES REDONDO','','ARTURO DANIEL'),
+  e('1176214464','T','CUISMAN DE LA CRUZ','','LUIS DE JESUS'),
+  e('1123407748','T','FERRER BARANDICA','','BERLIN JOHANA'),
+  e('1123409384','T','GOMEZ ROMERO','','LUZKARIME'),
+  e('1123409814','T','GUERRERO RODRIGUEZ','','MINEILIS CAROLINA'),
+  e('1029861907','T','GUERRERO RODRIGUEZ','','MINELLIS PATRICIA'),
+  e('1123409761','T','HOYOS ACOSTA','','HIVER DANIEL'),
+  e('1123410189','T','MARTINEZ CHOLES','','SAMIR JOSE'),
+  e('1029862468','T','MENA VARELA','','FRANCE MARTIN'),
+  e('1118844689','T','MENDOZA OÑATE','','MARIELY JOSE'),
+  e('1176214314','T','MINDIOLA MOSCOSTE','','DANIS DANIEL'),
+  e('1123407884','T','MOSCOTE CASTRILLO','','CARLOS MARIO'),
+  e('1123408267','T','MOSCOTES BERRIO','','CESAR AUGUSTO'),
+  e('1123409318','T','OÑATE BERRIO','','YAISULIS MILETH'),
+  e('1123409554','T','OSORIOS LEEST','','ANDREILIS MARIA'),
+  e('1119397505','T','PIMIENTA PAUTT','','YORLIAN ANDRES'),
+  e('1123407526','T','PIMIENTA REDONDO','','ERBIN EMILIO'),
+  e('1065636455','T','QUIROZ NAVARRO','','AILEEN SOFIA'),
+  e('1123409855','T','REDONDO MENGUAL','','YAREIMIS MICHELL'),
+  e('1123409780','T','REYES AREVALO','','LUIS ANGEL'),
+];
+
+const G11A: Estudiante[] = [
+  e('1123409306','T','ARIAS ALVARADO','','YOLEINIS MARIA'),
+  e('1176213322','T','BORRERO CARRILLO','','MANUEL JULIAN'),
+  e('1123408263','T','BRITO OÑATE','','JOHANNYS BEATRIZ'),
+  e('1082921023','T','BUENO GUEVARA','','NICOLAS JOSE'),
+  e('1029862355','T','CARDOZO BERMUDEZ','','ANDRUS DE JESUS'),
+  e('1123408678','T','CARDOZO CHOLES','','YANELIS LICETH'),
+  e('1118831853','T','CHOLES ROMERO','','DARWIN ENRIQUE'),
+  e('1120745374','T','ESPAÑA ARIÑO','','LUIS FERNANDO'),
+  e('1123407718','T','FERRER COTES','','BELEN DE JESUS'),
+  e('1083559643','C','FRANCO CONRADO','','JHONYS DE JESUS'),
+  e('1042858011','T','GUERRA GUILLOT','','FERNANDO DE JESUS'),
+  e('1123408885','T','GUILLOT GARCIA','','FERNAN DAVID'),
+  e('1123407894','T','GUTIERREZ LINDO','','ANDRES SANTIAGO'),
+  e('1065294287','T','HERRERA VILLALBA','','NATALI ANDREA'),
+  e('1123409013','T','LUNA BORRERO','','MILENA SOFIA'),
+  e('1148146933','T','MARTINEZ DOMINGUEZ','','GABRIEL DE JESUS'),
+  e('1123425862','C','MENDOZA CABALLERO','','SHAROL YULIANNIS'),
+  e('1123409950','T','MOLA REYES','','JANNER DAVID'),
+  e('1176214395','T','MORA MINDIOLA','','ANDREA MICHELLE'),
+  e('1123405931','C','MORALES ANAYA','','LEIDIS BREIDIS'),
+  e('1123407050','T','MOSCOTE ARIAS','','EDIL SANTIAGO'),
+  e('1123408238','T','MOSCOTE MARTINEZ','','VIDELIS MARIA'),
+  e('1139324974','T','MOSCOTE REDONDO','','YOVIARIS DAKEYI'),
+  e('1123407137','T','PIMIENTA MEZA','','YINEL DE JESUS'),
+  e('1029862445','T','PINTO PEÑARANDA','','ANDRES DAVID'),
+  e('1123408335','T','REDONDO CARRILLO','','JOSE DAVID'),
+  e('1123408351','T','REDONDO CHOLES','','ELIZABETH MARIA'),
+  e('1176214449','T','REDONDO MORALES','','JHON MARIO'),
+  e('1123408415','T','REYES DE LA CRUZ','','CLARA INES'),
+  e('1123409483','T','ROSADO MINDIOLA','','YINA YULIETH'),
+  e('1123407836','T','VEGA GOMEZ','','DANIELA ISABEL'),
+  e('1123408239','T','VEGA GOMEZ','','EUGENIA ISABEL'),
+  e('1235241108','T','ZARRAGA LOPEZ','','REBECA MARIA'),
+];
+
+const GMEF67: Estudiante[] = [
+  e('6804595','PPT','ACURERO CASTILLO','','PRISCILA ESTHER'),
+  e('1029863072','T','BORJA TEJEDA','','JUAN CARLOS'),
+  e('1118844088','T','CANTILLO IPUANA','','NAYARIS YULIET'),
+  e('1118832493','T','CANTILLO IPUANA','','NAYERLIS YOJANA'),
+  e('1082967453','T','CANTILLO PONCE','','ANDY SAMUEL'),
+  e('36540346','CEX','CASTRILLO HERRERA','','SARA SOFIA'),
+  e('1123410696','T','GAMARRA ALMAZO','','DUBRASKA YISELIS'),
+  e('1124552057_mef','T','GONZALEZ ROSADO','','MARGELIS JOSEFINA'),
+  e('1123407571','T','MEJIA NORIEGA','','JOSE RAFAEL'),
+  e('1123409771','T','MEJIA SUAREZ','','JOHANTONY'),
+  e('1288953','PPT','MENDEZ MONTIEL','','GABRIEL JOSE'),
+  e('1123410516','T','MENDOZA REDONDO','','KENDRI JOHANA'),
+  e('1152937728','T','MOLINARES TORRES','','LUIS JOSE'),
+  e('1151460794','T','MONTERROSA GOMEZ','','LUZ PAOLA'),
+  e('1123408100','T','NAVARRO ALVIRA','','YEILIN MARIA'),
+  e('1123408759','T','PADILLA ESCOBAR','','MANUEL DAVID'),
+  e('5891749','PPT','PALMAR PALMAR','','ALEJANDRO DAVID'),
+  e('1123409001','T','PEREZ GUILLOT','','YURANIS JAIDITH'),
+  e('1123407326','T','PEREZ MENDOZA','','NESTOR ALBERTO'),
+  e('1123406967','T','PESTANA ZURITA','','AILEN SOFIA'),
+  e('7639913','PPT','PINEDA PEREZ','','JOSE FRANCISCO'),
+  e('1123407093','T','POVEA MEDINA','','VICTOR MANUEL'),
+  e('1118858033','T','PUSHAINA ARPUSHANA','','BENJAMIN'),
+  e('1123410663','T','RAMIREZ AVILA','','MIGUEL ALFONSO'),
+  e('0000000003','T','RODRIGUEZ ALTAMAR','','RICARDO'),
+  e('1123412460','T','ROSADO RODRIGUEZ','','ALSIDE RAFAEL'),
+  e('1123410161','T','ROSADO RODRIGUEZ','','RUDI RAFAEL'),
+  e('1123408711_mef','T','SABAN VILLAR','','RONNY ALBERTO'),
+  e('1123409224','T','URUETA CARABALLO','','JOSE LUIS'),
+  e('1123407833','T','VALDEBLANQUEZ PADILLA','','RICHAR DE JESUS'),
+  e('1123408992','T','VASQUEZ RIVALDO','','YAIRA VANESSA'),
+];
+
+const GMEF89: Estudiante[] = [
+  e('1082964196','T','ARREGOCES URANGO','','JOHAN ANDRES'),
+  e('1176214461','T','BARROS SUAREZ','','MARIO ALBERTO'),
+  e('6746940','PPT','BEJARANO GARCIA','','SEBASTIAN JOSE'),
+  e('1123408692','T','BENITEZ MONSALVE','','EMILIO ENRIQUE'),
+  e('1123409286','T','BRITO MOSCOTE','','MARIS ELENA'),
+  e('1123408152','T','CASTRILLO RODRIGUEZ','','CARLOS ALBERTO'),
+  e('1123404462','C','CHOLES REDONDO','','CARLOS MIGUEL'),
+  e('1123410230','T','DEL PRADO RINCON','','JAISLYN JULIETH'),
+  e('1123409456','T','DIAZ PEREZ','','LEXIELY SOFIA'),
+  e('1149449436','T','EPIEYU IPUANA','','ADRIANA'),
+  e('1123409164','T','FERIA MERCADO','','SHARITH DAYANA'),
+  e('1021314977','T','GARCIA POVEA','','JHORDAN DAVID'),
+  e('1176213737','T','GONZALEZ MENDOZA','','CARLOS AUDIBEHT'),
+  e('1123409764','T','GONZALEZ MENDOZA','','JESUS GABRIEL'),
+  e('1123407935','T','GUZMAN LINDO','','DANIEL JOSE'),
+  e('1118845444','T','JUSAYU PUSHAINA','','EDUARDO'),
+  e('1118845443','T','JUSAYU PUSHAINA','','ERIKA PATRICIA'),
+  e('1123406609','T','MARRUGO MENDOZA','','CRISTIAN ALBERTO'),
+  e('1123494407','T','MENDOZA IRIARTE','','JUAN DAVID'),
+  e('1152940107','T','MOLINARES TORRES','','YITSY SOFIA'),
+  e('1123406822','T','MONTERROSA NAVARRO','','YOZUE'),
+  e('1123406847','C','NAVARRO QUINTERO','','LUIS JOSE'),
+  e('1123414901','T','ORTIZ VERGARA','','JESUS DAVID'),
+  e('1123408763','T','PESTANA ZURITA','','ANA LUCIA'),
+  e('1131075326','T','PUSHAINA JUSAYU','','ENRIQUE'),
+  e('1123407212','T','RUIZ MOSCOTE','','SUJEILYS BRICETH'),
+  e('1176214005','T','SIERRA ARROYO','','ALIX SOFIA'),
+  e('1123402124','C','TORREGROSA VANEGAS','','JOSE MANUEL'),
+  e('0000000004','T','URECHE PEREIRA','','RICARCO ENRIQUE'),
+  e('1119395070','T','URIANA URIANA','','RUTH VALENTINA'),
+];
+
+const GMEF1011: Estudiante[] = [
+  e('1118812809','C','ACOSTA LEDESMA','','LILIANA ISABEL'),
+  e('1123404147','C','BAUTISTA JIMENEZ','','ARLIS DAVID'),
+  e('1123407545','C','BERMUDEZ CARRILLO','','JUAN DAVID'),
+  e('1118837287','T','CADENAS MIRANDA','','ANDRES FELIPE'),
+  e('1123407440','T','CHOLES ARIAS','','REINARIS BRIYITH'),
+  e('1123406479','T','FERNANDEZ LUGO','','LUISA FERNANDA'),
+  e('1123405349','C','LOPEZ ROJAS','','CRISTIAN RONALDO'),
+  e('1123407638','T','MACIAS GARCIA','','JESUS DAVID'),
+  e('1123405519','C','MENDOZA POVEA','','SHAROL YANETH'),
+  e('1123407386','T','MENDOZA REDONDO','','LISS JOHANA'),
+  e('1119700938','T','MORA MENA','','BALERIA DE JESUS'),
+  e('1123404088','C','NUÑEZ CARDENAS','','GRISELDA BEATRIZ'),
+  e('1123406608','T','OÑATE BERRIO','','JAVIER DE JESUS'),
+  e('1083574128','T','PABON ACUÑA','','GHENDYS PATRICIA'),
+  e('176213279','T','PALMERA CANTILLO','','JONEIFER DAVID'),
+  e('1123406074','C','PERTUZ BOCANEGRA','','KAREN LORENA'),
+  e('6951343','PPT','PIRELA GONZALEZ','','ALEXANDER JOSE'),
+  e('1123407331','T','RODRIGUEZ EVILLA','','JOSE DAVID'),
+  e('1118810822','C','ROSADO RODRIGUEZ','','RIQUELMIS RAFAEL'),
+  e('1128828314','C','RUIZ BARRIOS','','ALEJANDRO JOSE'),
+  e('1128200432','T','SANCHEZ RUA','','JAIRYS MILENA'),
+];
+
+// ── Mapa grupos → estudiantes ──────────────────────────────
+
+const GRUPOS_MAP: { grupoId: string; estudiantes: Estudiante[] }[] = [
+  { grupoId: IDS.G_6A,      estudiantes: G6A },
+  { grupoId: IDS.G_6B,      estudiantes: G6B },
+  { grupoId: IDS.G_7A,      estudiantes: G7A },
+  { grupoId: IDS.G_7B,      estudiantes: G7B },
+  { grupoId: IDS.G_8A,      estudiantes: G8A },
+  { grupoId: IDS.G_9A,      estudiantes: G9A },
+  { grupoId: IDS.G_9B,      estudiantes: G9B },
+  { grupoId: IDS.G_10A,     estudiantes: G10A },
+  { grupoId: IDS.G_11A,     estudiantes: G11A },
+  { grupoId: IDS.G_MEF67,   estudiantes: GMEF67 },
+  { grupoId: IDS.G_MEF89,   estudiantes: GMEF89 },
+  { grupoId: IDS.G_MEF1011, estudiantes: GMEF1011 },
+];
+
+// ── Seed principal (idempotente) ───────────────────────────
+
+export async function sembrarDatos(): Promise<void> {
+  const existentes = await db.grupos.count();
+  if (existentes > 0) return;
+
+  await db.transaction('rw', [
+    db.areas, db.asignaturas, db.grupos, db.grupo_asignaturas,
+    db.estudiantes, db.matriculas,
+  ], async () => {
+
+    // Áreas
+    await db.areas.bulkAdd([
+      { id: IDS.AREA_INFORMATICA, nombre: 'Tecnología e Informática', tipo: 'BASICA' as const, created_at: NOW, updated_at: NOW },
+      { id: IDS.AREA_MATEMATICAS, nombre: 'Matemáticas',              tipo: 'BASICA' as const, created_at: NOW, updated_at: NOW },
+    ]);
+
+    // Asignaturas
+    await db.asignaturas.bulkAdd([
+      { id: IDS.ASIG_INFORMATICA, area_id: IDS.AREA_INFORMATICA, nombre: 'Informática',   horas_semana: 2, created_at: NOW, updated_at: NOW },
+      { id: IDS.ASIG_MATEMATICAS, area_id: IDS.AREA_MATEMATICAS, nombre: 'Matemáticas',   horas_semana: 4, created_at: NOW, updated_at: NOW },
+    ]);
+
+    // Grupos
+    const gruposDef = [
+      { id: IDS.G_6A,      anio: 2026, nombre: '6A',          grado_cod: 6,  num_periodos: 4 },
+      { id: IDS.G_6B,      anio: 2026, nombre: '6B',          grado_cod: 6,  num_periodos: 4 },
+      { id: IDS.G_7A,      anio: 2026, nombre: '7A',          grado_cod: 7,  num_periodos: 4 },
+      { id: IDS.G_7B,      anio: 2026, nombre: '7B',          grado_cod: 7,  num_periodos: 4 },
+      { id: IDS.G_8A,      anio: 2026, nombre: '8A',          grado_cod: 8,  num_periodos: 4 },
+      { id: IDS.G_9A,      anio: 2026, nombre: '9A',          grado_cod: 9,  num_periodos: 4 },
+      { id: IDS.G_9B,      anio: 2026, nombre: '9B',          grado_cod: 9,  num_periodos: 4 },
+      { id: IDS.G_10A,     anio: 2026, nombre: '10A',         grado_cod: 10, num_periodos: 4 },
+      { id: IDS.G_11A,     anio: 2026, nombre: '11A',         grado_cod: 11, num_periodos: 4 },
+      { id: IDS.G_MEF67,   anio: 2026, nombre: 'MEF 6-7 A',   grado_cod: 6,  num_periodos: 4 },
+      { id: IDS.G_MEF89,   anio: 2026, nombre: 'MEF 8-9 A',   grado_cod: 8,  num_periodos: 4 },
+      { id: IDS.G_MEF1011, anio: 2026, nombre: 'MEF 10-11 A', grado_cod: 10, num_periodos: 4 },
+    ];
+    await db.grupos.bulkAdd(gruposDef.map(g => ({ ...g, created_at: NOW, updated_at: NOW })));
+
+    // Asignaciones grupo ↔ asignatura (todos → Informática; 7A → Matemáticas también)
+    const ga = gruposDef.map(g => ({
+      id: uuid(), grupo_id: g.id, asignatura_id: IDS.ASIG_INFORMATICA, created_at: NOW, updated_at: NOW,
+    }));
+    ga.push({ id: uuid(), grupo_id: IDS.G_7A, asignatura_id: IDS.ASIG_MATEMATICAS, created_at: NOW, updated_at: NOW });
+    await db.grupo_asignaturas.bulkAdd(ga);
+
+    // Estudiantes + matrículas por grupo
+    for (const { grupoId, estudiantes } of GRUPOS_MAP) {
+      await db.estudiantes.bulkAdd(estudiantes);
+      await db.matriculas.bulkAdd(
+        estudiantes.map(est => ({
+          id: uuid(), estudiante_id: est.id, grupo_id: grupoId,
+          anio: 2026, activo: true, created_at: NOW, updated_at: NOW,
+        }))
+      );
+    }
+  });
+}

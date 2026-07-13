@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  /* Scrollbar delgada para tablets */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1e293b;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 2px;
+  }
+}
+
+@layer utilities {
+  /* Área táctil mínima recomendada para tablets (44px) */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
