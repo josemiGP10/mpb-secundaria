@@ -92,7 +92,7 @@ export function App() {
   // ── Pantalla de carga ─────────────────────────────────────
   if (!dbReady) {
     return (
-      <div className="h-screen flex items-center justify-center bg-surface">
+      <div className="flex items-center justify-center bg-surface" style={{ height: '100dvh' }}>
         <div className="flex flex-col items-center gap-4">
           <img src="/logo.png" alt="IERMPB" className="w-16 h-16 object-contain opacity-70"
                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -106,7 +106,7 @@ export function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-surface overflow-hidden">
+    <div className="flex flex-col bg-surface overflow-hidden" style={{ height: '100dvh' }}>
       {/* Header */}
       <header className="flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-surface-muted flex-shrink-0">
         <img src="/logo.png" alt="IERMPB" className="w-7 h-7 object-contain flex-shrink-0"
