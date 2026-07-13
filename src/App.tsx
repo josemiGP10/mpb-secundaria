@@ -4,15 +4,17 @@ import { sincronizarSubida, sincronizarBajada, getUltimaSync } from './db/syncSe
 import { CalificacionesView } from './modules/calificaciones/CalificacionesView';
 import { AsistenciaView } from './modules/asistencia/AsistenciaView';
 import { SecuenciasView } from './modules/secuencias/SecuenciasView';
+import { ReportesView } from './modules/reportes/ReportesView';
 
-type Screen = 'home' | 'asistencia' | 'calificaciones' | 'secuencias';
+type Screen = 'home' | 'asistencia' | 'calificaciones' | 'secuencias' | 'reportes';
 
 interface NavItem { id: Screen; label: string; icon: string; }
 const NAV_ITEMS: NavItem[] = [
-  { id: 'home',           label: 'Inicio',     icon: '⌂' },
-  { id: 'asistencia',     label: 'Asistencia', icon: '✓' },
-  { id: 'calificaciones', label: 'Notas',      icon: '✎' },
-  { id: 'secuencias',     label: 'Secuencias', icon: '⊞' },
+  { id: 'home',           label: 'Inicio',   icon: '⌂' },
+  { id: 'asistencia',     label: 'Asist.',   icon: '✓' },
+  { id: 'calificaciones', label: 'Notas',    icon: '✎' },
+  { id: 'secuencias',     label: 'Secuenc.', icon: '⊞' },
+  { id: 'reportes',       label: 'Reporte',  icon: '🖨' },
 ];
 
 export function App() {
@@ -149,6 +151,7 @@ export function App() {
         {screen === 'asistencia'     && <AsistenciaView />}
         {screen === 'calificaciones' && <CalificacionesView />}
         {screen === 'secuencias'     && <SecuenciasView />}
+        {screen === 'reportes'       && <ReportesView />}
       </main>
 
       {/* Nav inferior */}

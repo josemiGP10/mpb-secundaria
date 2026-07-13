@@ -406,6 +406,12 @@ const GRUPOS_MAP: { grupoId: string; estudiantes: Estudiante[] }[] = [
 // ── Seed principal (idempotente) ───────────────────────────
 
 export async function sembrarDatos(): Promise<void> {
+  // Migración: MEF groups siempre deben tener 2 semestres (no 4 períodos)
+  const NOW_MIG = new Date().toISOString();
+  await db.grupos
+    .where('id').anyOf([IDS.G_MEF67, IDS.G_MEF89, IDS.G_MEF1011])
+    .modify({ num_periodos: 2, updated_at: NOW_MIG });
+
   const existentes = await db.grupos.count();
   if (existentes > 0) return;
 
@@ -437,9 +443,9 @@ export async function sembrarDatos(): Promise<void> {
       { id: IDS.G_9B,      anio: 2026, nombre: '9B',          grado_cod: 9,  num_periodos: 4 },
       { id: IDS.G_10A,     anio: 2026, nombre: '10A',         grado_cod: 10, num_periodos: 4 },
       { id: IDS.G_11A,     anio: 2026, nombre: '11A',         grado_cod: 11, num_periodos: 4 },
-      { id: IDS.G_MEF67,   anio: 2026, nombre: 'MEF 6-7 A',   grado_cod: 6,  num_periodos: 4 },
-      { id: IDS.G_MEF89,   anio: 2026, nombre: 'MEF 8-9 A',   grado_cod: 8,  num_periodos: 4 },
-      { id: IDS.G_MEF1011, anio: 2026, nombre: 'MEF 10-11 A', grado_cod: 10, num_periodos: 4 },
+      { id: IDS.G_MEF67,   anio: 2026, nombre: 'MEF 6-7 A',   grado_cod: 6,  num_periodos: 2 },
+      { id: IDS.G_MEF89,   anio: 2026, nombre: 'MEF 8-9 A',   grado_cod: 8,  num_periodos: 2 },
+      { id: IDS.G_MEF1011, anio: 2026, nombre: 'MEF 10-11 A', grado_cod: 10, num_periodos: 2 },
     ];
     await db.grupos.bulkAdd(gruposDef.map(g => ({ ...g, created_at: NOW, updated_at: NOW })));
 

@@ -272,7 +272,8 @@ export function CalificacionesView() {
         </div>
         {/* Fila 2: periodo + modo + masivo + badge */}
         <div className="flex items-center gap-1.5">
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-slate-400 mr-0.5">{numPeriodos === 2 ? 'Sem.' : 'Per.'}</span>
             {Array.from({ length: numPeriodos }, (_, i) => i + 1).map((p) => (
               <button
                 key={p}
@@ -448,7 +449,7 @@ function GrillaCalificaciones({
           )}
           <th
             rowSpan={2}
-            className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium border-b border-r border-surface-muted min-w-[190px] align-bottom"
+            className="sticky left-0 z-20 bg-surface-card text-left px-2 py-2.5 text-xs text-slate-400 font-medium border-b border-r border-surface-muted min-w-[100px] sm:min-w-[160px] align-bottom"
           >
             Estudiante
           </th>
@@ -606,10 +607,12 @@ function FilaRow({
         </td>
       )}
 
-      {/* Nombre */}
-      <td className="px-4 py-2 text-xs text-slate-900 leading-snug border-r border-surface-muted/30">
-        <span className="text-slate-500 mr-1.5 tabular-nums">{index + 1}.</span>
-        {fila.nombreCompleto}
+      {/* Nombre — sticky en móvil */}
+      <td className={`sticky left-0 z-10 px-2 py-2 text-xs text-slate-900 leading-snug border-r border-surface-muted/30 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+        <span className="text-slate-400 mr-1 tabular-nums text-[10px]">{index + 1}.</span>
+        {/* Móvil: solo apellido + inicial del nombre. Escritorio: nombre completo */}
+        <span className="sm:hidden font-medium">{nombreCorto(fila.nombreCompleto)}</span>
+        <span className="hidden sm:inline">{fila.nombreCompleto}</span>
       </td>
 
       {/* Celdas de actividades */}
@@ -939,6 +942,16 @@ function GradePicker({
 }
 
 // ── Helpers ───────────────────────────────────────────────
+
+/** En móvil muestra "APELLIDO N." para ahorrar espacio */
+function nombreCorto(nombreCompleto: string): string {
+  const partes = nombreCompleto.trim().split(' ');
+  if (partes.length <= 1) return nombreCompleto;
+  // Toma los primeros 2 tokens como apellidos y la inicial del primer nombre
+  const apellidos = partes.slice(0, Math.min(2, partes.length - 1)).join(' ');
+  const inicialNombre = partes[partes.length - 1]?.[0] ?? '';
+  return `${apellidos} ${inicialNombre}.`;
+}
 
 function colorBtnForValue(v: number): string {
   if (v >= 9.0) return 'bg-emerald-100 border-emerald-400 text-emerald-800 hover:bg-emerald-200';
