@@ -130,6 +130,27 @@ export async function sincronizarBajada(): Promise<SyncResult> {
   return { ok: errores.length === 0, total, errores, ts };
 }
 
+// ── Sync completo (subida + bajada) ────────────────────────
+// Sube datos locales primero, luego baja todo lo de Supabase.
+// Así cualquier dispositivo queda sincronizado con los demás.
+
+export async function sincronizarCompleto(): Promise<SyncResult> {
+  const errores: string[] = [];
+  let total = 0;
+
+  const subida = await sincronizarSubida();
+  total += subida.total;
+  errores.push(...subida.errores);
+
+  const bajada = await sincronizarBajada();
+  total += bajada.total;
+  errores.push(...bajada.errores);
+
+  const ts = new Date().toISOString();
+  if (errores.length === 0) localStorage.setItem(SYNC_TS_KEY, ts);
+  return { ok: errores.length === 0, total, errores, ts };
+}
+
 // ── Helpers de UI ──────────────────────────────────────────
 
 export function getUltimaSync(): string | null {

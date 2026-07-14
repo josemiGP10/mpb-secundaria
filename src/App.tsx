@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sembrarDatos } from './db/seed';
-import { sincronizarSubida, sincronizarBajada, getUltimaSync } from './db/syncService';
+import { sincronizarCompleto, sincronizarBajada, getUltimaSync } from './db/syncService';
 import { CalificacionesView } from './modules/calificaciones/CalificacionesView';
 import { AsistenciaView } from './modules/asistencia/AsistenciaView';
 import { SecuenciasView } from './modules/secuencias/SecuenciasView';
@@ -59,7 +59,7 @@ export function App() {
         if (!navigator.onLine) return;
         setSincronizando(true);
         try {
-          const res = await sincronizarSubida();
+          const res = await sincronizarCompleto();
           if (res.ok) setUltimaSync(res.ts);
           else setSyncError(true);
         } catch { setSyncError(true); }
@@ -84,7 +84,7 @@ export function App() {
     setSincronizando(true);
     setSyncError(false);
     try {
-      const res = await sincronizarSubida();
+      const res = await sincronizarCompleto();
       if (res.ok) setUltimaSync(res.ts);
       else setSyncError(true);
     } catch { setSyncError(true); }
