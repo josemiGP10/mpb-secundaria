@@ -56,34 +56,58 @@ export function App() {
     init().catch(console.error);
   }, []);
 
-  // ── Auto-sync al reconectar ───────────────────────────────
+  // ── Auto-sync: al reconectar, al volver al tab, y cada 2 min ─
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
+    let autoTimer: ReturnType<typeof setInterval>;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    let syncRunning = false;
+
+    const doSync = async () => {
+      if (syncRunning || !navigator.onLine) return;
+      syncRunning = true;
+      setSincronizando(true);
+      setSyncError(false);
+      setSyncErrorMsg('');
+      try {
+        const res = await sincronizarCompleto();
+        if (res.ok) setUltimaSync(res.ts);
+        else registrarError(res);
+      } catch (e) { registrarError(null, e); }
+      finally { setSincronizando(false); syncRunning = false; }
+    };
 
     const handleOnline = () => {
       setEnLinea(true);
-      setSyncError(false);
-      setSyncErrorMsg('');
-      timer = setTimeout(async () => {
-        if (!navigator.onLine) return;
-        setSincronizando(true);
-        try {
-          const res = await sincronizarCompleto();
-          if (res.ok) setUltimaSync(res.ts);
-          else registrarError(res);
-        } catch (e) { registrarError(null, e); }
-        finally { setSincronizando(false); }
-      }, 2000);
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(doSync, 2000);
     };
 
-    const handleOffline = () => { setEnLinea(false); clearTimeout(timer); };
+    const handleOffline = () => {
+      setEnLinea(false);
+      clearTimeout(reconnectTimer);
+    };
+
+    // Sincronizar al volver al app (cambio de pestaña o desbloqueo)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        doSync();
+      }
+    };
+
+    // Auto-sync cada 2 minutos si hay conexión
+    autoTimer = setInterval(() => {
+      if (navigator.onLine) doSync();
+    }, 2 * 60 * 1000);
 
     window.addEventListener('online',  handleOnline);
     window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('online',  handleOnline);
       window.removeEventListener('offline', handleOffline);
-      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearTimeout(reconnectTimer);
+      clearInterval(autoTimer);
     };
   }, []);
 
