@@ -36,13 +36,14 @@ async function subirTabla(tabla: string, rows: unknown[]): Promise<void> {
   }
 }
 
-async function bajarDesde(tabla: string, desde: string | null): Promise<unknown[]> {
+// campo de fecha para filtrar delta (notas_cognitivas y registros_asistencia solo tienen created_at)
+async function bajarDesde(tabla: string, desde: string | null, campo = 'updated_at'): Promise<unknown[]> {
   const todas: unknown[] = [];
   let offset = 0;
   const PG = 1000;
   while (true) {
     let query = supabase!.from(tabla).select('*').range(offset, offset + PG - 1);
-    if (desde) query = query.gt('updated_at', desde);
+    if (desde) query = query.gt(campo, desde);
     const { data, error } = await query;
     if (error) throw new Error(`[${tabla}] ${error.message}`);
     todas.push(...(data ?? []));
@@ -150,11 +151,12 @@ export async function sincronizarBajada(): Promise<SyncResult> {
   ];
 
   // Tablas de trabajo: solo nuevas/modificadas en Supabase desde última sync
-  const trabajoPasos: [string, (r: unknown[]) => Promise<void>][] = [
+  // [tabla, putter, campoFecha?] — campoFecha por defecto 'updated_at'
+  const trabajoPasos: [string, (r: unknown[]) => Promise<void>, string?][] = [
     ['actividades_cognitivas', async (r) => { await db.actividades_cognitivas.bulkPut(r as never); }],
     ['calificaciones',         async (r) => { await db.calificaciones.bulkPut(r as never); }],
-    ['notas_cognitivas',       async (r) => { await db.notas_cognitivas.bulkPut(r as never); }],
-    ['registros_asistencia',   async (r) => { await db.registros_asistencia.bulkPut(r as never); }],
+    ['notas_cognitivas',       async (r) => { await db.notas_cognitivas.bulkPut(r as never); },     'created_at'],
+    ['registros_asistencia',   async (r) => { await db.registros_asistencia.bulkPut(r as never); }, 'created_at'],
     ['secuencias',             async (r) => { await db.secuencias.bulkPut(r as never); }],
     ['sesiones',               async (r) => { await db.sesiones.bulkPut(r as never); }],
     ['registros_clase',        async (r) => { await db.registros_clase.bulkPut(r as never); }],
@@ -170,9 +172,9 @@ export async function sincronizarBajada(): Promise<SyncResult> {
     }
   }
 
-  for (const [tabla, putter] of trabajoPasos) {
+  for (const [tabla, putter, campo] of trabajoPasos) {
     try {
-      const rows = await bajarDesde(tabla, ultimaSync);
+      const rows = await bajarDesde(tabla, ultimaSync, campo);
       await putter(rows);
       total += rows.length;
     } catch (e) {
