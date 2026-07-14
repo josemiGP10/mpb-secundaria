@@ -3,9 +3,14 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-// Si las variables no están configuradas la app funciona offline sin sync.
-export const supabase: SupabaseClient | null = (url && key)
-  ? createClient(url, key)
-  : null;
+let _client: SupabaseClient | null = null;
+try {
+  if (url && key) {
+    _client = createClient(url, key);
+  }
+} catch (e) {
+  console.error('[Supabase] URL o key inválida — app funcionará solo offline:', e);
+}
 
-export const supabaseConfigurado = !!supabase;
+export const supabase = _client;
+export const supabaseConfigurado = !!_client;
