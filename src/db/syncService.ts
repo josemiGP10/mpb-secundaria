@@ -1,12 +1,10 @@
 // ============================================================
 //  Sincronización local ↔ Supabase — Diario Pedagógico MPB
 //
-//  SUBIDA  (sincronizarSubida):  IndexedDB → Supabase
-//  BAJADA  (sincronizarBajada):  Supabase  → IndexedDB
-//
-//  Estrategia: last-write-wins por updated_at / upsert por id.
-//  El seed de grupos/estudiantes siempre viaja en la subida
-//  para que un dispositivo nuevo reciba todo en la bajada.
+//  SUBIDA delta: solo registros modificados desde la última sync.
+//  BAJADA delta: solo registros de Supabase más nuevos que la última sync.
+//  Tablas catálogo (areas, asignaturas, grupos, etc.) siempre completas
+//  porque son pocas filas y raramente cambian.
 // ============================================================
 
 import { supabase } from '@/lib/supabase';
@@ -15,12 +13,18 @@ import { db } from './database';
 const SYNC_TS_KEY = 'mpb_sec_last_sync';
 const BATCH       = 400;
 
+// ── Resultado ──────────────────────────────────────────────
+
+export interface SyncResult {
+  ok: boolean; total: number; errores: string[]; ts: string;
+}
+
 const NO_CONFIG: SyncResult = {
   ok: false, total: 0, ts: new Date().toISOString(),
   errores: ['Supabase no configurado: faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel'],
 };
 
-// ── Helpers ────────────────────────────────────────────────
+// ── Helpers de red ─────────────────────────────────────────
 
 async function subirTabla(tabla: string, rows: unknown[]): Promise<void> {
   if (rows.length === 0) return;
@@ -32,46 +36,74 @@ async function subirTabla(tabla: string, rows: unknown[]): Promise<void> {
   }
 }
 
-async function bajarTabla(tabla: string): Promise<unknown[]> {
+async function bajarDesde(tabla: string, desde: string | null): Promise<unknown[]> {
   const todas: unknown[] = [];
-  let desde = 0;
+  let offset = 0;
   const PG = 1000;
   while (true) {
-    const { data, error } = await supabase!
-      .from(tabla)
-      .select('*')
-      .range(desde, desde + PG - 1);
+    let query = supabase!.from(tabla).select('*').range(offset, offset + PG - 1);
+    if (desde) query = query.gt('updated_at', desde);
+    const { data, error } = await query;
     if (error) throw new Error(`[${tabla}] ${error.message}`);
     todas.push(...(data ?? []));
     if (!data || data.length < PG) break;
-    desde += PG;
+    offset += PG;
   }
   return todas;
 }
 
-// ── Resultado ──────────────────────────────────────────────
+async function bajarSinFiltro(tabla: string): Promise<unknown[]> {
+  const todas: unknown[] = [];
+  let offset = 0;
+  const PG = 1000;
+  while (true) {
+    const { data, error } = await supabase!
+      .from(tabla).select('*').range(offset, offset + PG - 1);
+    if (error) throw new Error(`[${tabla}] ${error.message}`);
+    todas.push(...(data ?? []));
+    if (!data || data.length < PG) break;
+    offset += PG;
+  }
+  return todas;
+}
 
-export interface SyncResult {
-  ok: boolean; total: number; errores: string[]; ts: string;
+// ── Helpers de UI ──────────────────────────────────────────
+
+export function getUltimaSync(): string | null {
+  return localStorage.getItem(SYNC_TS_KEY);
 }
 
 // ══════════════════════════════════════════════════════════
-//  SUBIDA: local → Supabase
+//  SUBIDA: local → Supabase (delta desde última sync)
 // ══════════════════════════════════════════════════════════
 
 export async function sincronizarSubida(): Promise<SyncResult> {
   if (!supabase) return NO_CONFIG;
+
   const errores: string[] = [];
   let total = 0;
+  const ultimaSync = getUltimaSync();
 
-  // Orden: catálogo primero, luego datos de trabajo, luego secuencias
-  const pasos: [string, () => Promise<unknown[]>][] = [
-    ['areas',                  () => db.areas.toArray()],
-    ['asignaturas',            () => db.asignaturas.toArray()],
-    ['grupos',                 () => db.grupos.toArray()],
-    ['grupo_asignaturas',      () => db.grupo_asignaturas.toArray()],
-    ['estudiantes',            () => db.estudiantes.toArray()],
-    ['matriculas',             () => db.matriculas.toArray()],
+  // Tablas catálogo: siempre completas (pocas filas, raramente cambian)
+  const catalogo: [string, () => Promise<unknown[]>][] = [
+    ['areas',             () => db.areas.toArray()],
+    ['asignaturas',       () => db.asignaturas.toArray()],
+    ['grupos',            () => db.grupos.toArray()],
+    ['grupo_asignaturas', () => db.grupo_asignaturas.toArray()],
+    ['estudiantes',       () => db.estudiantes.toArray()],
+    ['matriculas',        () => db.matriculas.toArray()],
+  ];
+
+  // Tablas de trabajo: solo las modificadas desde la última sync
+  const trabajo: [string, () => Promise<unknown[]>][] = ultimaSync ? [
+    ['actividades_cognitivas', () => db.actividades_cognitivas.where('updated_at').above(ultimaSync).toArray()],
+    ['calificaciones',         () => db.calificaciones.where('updated_at').above(ultimaSync).toArray()],
+    ['notas_cognitivas',       () => db.notas_cognitivas.where('created_at').above(ultimaSync).toArray()],
+    ['registros_asistencia',   () => db.registros_asistencia.where('created_at').above(ultimaSync).toArray()],
+    ['secuencias',             () => db.secuencias.where('updated_at').above(ultimaSync).toArray()],
+    ['sesiones',               () => db.sesiones.where('updated_at').above(ultimaSync).toArray()],
+    ['registros_clase',        () => db.registros_clase.where('updated_at').above(ultimaSync).toArray()],
+  ] : [
     ['actividades_cognitivas', () => db.actividades_cognitivas.toArray()],
     ['calificaciones',         () => db.calificaciones.toArray()],
     ['notas_cognitivas',       () => db.notas_cognitivas.toArray()],
@@ -81,7 +113,7 @@ export async function sincronizarSubida(): Promise<SyncResult> {
     ['registros_clase',        () => db.registros_clase.toArray()],
   ];
 
-  for (const [tabla, getter] of pasos) {
+  for (const [tabla, getter] of [...catalogo, ...trabajo]) {
     try {
       const rows = await getter();
       await subirTabla(tabla, rows);
@@ -97,22 +129,28 @@ export async function sincronizarSubida(): Promise<SyncResult> {
 }
 
 // ══════════════════════════════════════════════════════════
-//  BAJADA: Supabase → local
-//  Primer uso en un dispositivo nuevo: descarga todo.
+//  BAJADA: Supabase → local (delta desde última sync)
 // ══════════════════════════════════════════════════════════
 
 export async function sincronizarBajada(): Promise<SyncResult> {
   if (!supabase) return NO_CONFIG;
+
   const errores: string[] = [];
   let total = 0;
+  const ultimaSync = getUltimaSync();
 
-  const pasos: [string, (rows: unknown[]) => Promise<void>][] = [
-    ['areas',                  async (r) => { await db.areas.bulkPut(r as never); }],
-    ['asignaturas',            async (r) => { await db.asignaturas.bulkPut(r as never); }],
-    ['grupos',                 async (r) => { await db.grupos.bulkPut(r as never); }],
-    ['grupo_asignaturas',      async (r) => { await db.grupo_asignaturas.bulkPut(r as never); }],
-    ['estudiantes',            async (r) => { await db.estudiantes.bulkPut(r as never); }],
-    ['matriculas',             async (r) => { await db.matriculas.bulkPut(r as never); }],
+  // Catálogo: siempre completo
+  const catalogoPasos: [string, (r: unknown[]) => Promise<void>][] = [
+    ['areas',             async (r) => { await db.areas.bulkPut(r as never); }],
+    ['asignaturas',       async (r) => { await db.asignaturas.bulkPut(r as never); }],
+    ['grupos',            async (r) => { await db.grupos.bulkPut(r as never); }],
+    ['grupo_asignaturas', async (r) => { await db.grupo_asignaturas.bulkPut(r as never); }],
+    ['estudiantes',       async (r) => { await db.estudiantes.bulkPut(r as never); }],
+    ['matriculas',        async (r) => { await db.matriculas.bulkPut(r as never); }],
+  ];
+
+  // Tablas de trabajo: solo nuevas/modificadas en Supabase desde última sync
+  const trabajoPasos: [string, (r: unknown[]) => Promise<void>][] = [
     ['actividades_cognitivas', async (r) => { await db.actividades_cognitivas.bulkPut(r as never); }],
     ['calificaciones',         async (r) => { await db.calificaciones.bulkPut(r as never); }],
     ['notas_cognitivas',       async (r) => { await db.notas_cognitivas.bulkPut(r as never); }],
@@ -122,9 +160,19 @@ export async function sincronizarBajada(): Promise<SyncResult> {
     ['registros_clase',        async (r) => { await db.registros_clase.bulkPut(r as never); }],
   ];
 
-  for (const [tabla, putter] of pasos) {
+  for (const [tabla, putter] of catalogoPasos) {
     try {
-      const rows = await bajarTabla(tabla);
+      const rows = await bajarSinFiltro(tabla);
+      await putter(rows);
+      total += rows.length;
+    } catch (e) {
+      errores.push(String(e));
+    }
+  }
+
+  for (const [tabla, putter] of trabajoPasos) {
+    try {
+      const rows = await bajarDesde(tabla, ultimaSync);
       await putter(rows);
       total += rows.length;
     } catch (e) {
@@ -137,12 +185,13 @@ export async function sincronizarBajada(): Promise<SyncResult> {
   return { ok: errores.length === 0, total, errores, ts };
 }
 
-// ── Sync completo (subida + bajada) ────────────────────────
-// Sube datos locales primero, luego baja todo lo de Supabase.
-// Así cualquier dispositivo queda sincronizado con los demás.
+// ══════════════════════════════════════════════════════════
+//  SYNC COMPLETO: subida + bajada
+// ══════════════════════════════════════════════════════════
 
 export async function sincronizarCompleto(): Promise<SyncResult> {
   if (!supabase) return NO_CONFIG;
+
   const errores: string[] = [];
   let total = 0;
 
@@ -157,10 +206,4 @@ export async function sincronizarCompleto(): Promise<SyncResult> {
   const ts = new Date().toISOString();
   if (errores.length === 0) localStorage.setItem(SYNC_TS_KEY, ts);
   return { ok: errores.length === 0, total, errores, ts };
-}
-
-// ── Helpers de UI ──────────────────────────────────────────
-
-export function getUltimaSync(): string | null {
-  return localStorage.getItem(SYNC_TS_KEY);
 }
