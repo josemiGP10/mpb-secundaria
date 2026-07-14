@@ -24,6 +24,14 @@ export function App() {
   const [enLinea,       setEnLinea]       = useState(navigator.onLine);
   const [ultimaSync,    setUltimaSync]    = useState<string | null>(getUltimaSync);
   const [syncError,     setSyncError]     = useState(false);
+  const [syncErrorMsg,  setSyncErrorMsg]  = useState<string>('');
+
+  const registrarError = (res: { ok: boolean; errores: string[] } | null, err?: unknown) => {
+    setSyncError(true);
+    const msg = res?.errores?.join(' | ') ?? String(err ?? 'Error desconocido');
+    setSyncErrorMsg(msg);
+    console.error('[SYNC ERROR]', msg);
+  };
 
   // ── Inicialización: seed + primera bajada si no hay datos ─
   useEffect(() => {
@@ -38,8 +46,8 @@ export function App() {
         try {
           const res = await sincronizarBajada();
           if (res.ok) setUltimaSync(res.ts);
-          else setSyncError(true);
-        } catch { setSyncError(true); }
+          else registrarError(res);
+        } catch (e) { registrarError(null, e); }
         finally { setSincronizando(false); }
       }
 
@@ -55,14 +63,15 @@ export function App() {
     const handleOnline = () => {
       setEnLinea(true);
       setSyncError(false);
+      setSyncErrorMsg('');
       timer = setTimeout(async () => {
         if (!navigator.onLine) return;
         setSincronizando(true);
         try {
           const res = await sincronizarCompleto();
           if (res.ok) setUltimaSync(res.ts);
-          else setSyncError(true);
-        } catch { setSyncError(true); }
+          else registrarError(res);
+        } catch (e) { registrarError(null, e); }
         finally { setSincronizando(false); }
       }, 2000);
     };
@@ -83,11 +92,12 @@ export function App() {
     if (sincronizando || !enLinea) return;
     setSincronizando(true);
     setSyncError(false);
+    setSyncErrorMsg('');
     try {
       const res = await sincronizarCompleto();
       if (res.ok) setUltimaSync(res.ts);
-      else setSyncError(true);
-    } catch { setSyncError(true); }
+      else registrarError(res);
+    } catch (e) { registrarError(null, e); }
     finally { setSincronizando(false); }
   };
 
@@ -123,15 +133,15 @@ export function App() {
 
         {/* Indicador de sync */}
         <button
-          onClick={handleSyncManual}
           disabled={sincronizando || !enLinea}
-          title={enLinea ? 'Sincronizar ahora' : 'Sin conexión'}
+          title={syncError ? syncErrorMsg || 'Error al sincronizar' : enLinea ? 'Sincronizar ahora' : 'Sin conexión'}
+          onClick={() => syncError ? alert(`Error de sync:\n\n${syncErrorMsg}`) : handleSyncManual()}
           className="flex items-center gap-1.5 flex-shrink-0 px-2 py-1 rounded-lg transition-colors disabled:opacity-60"
         >
           {sincronizando ? (
             <span className="w-3 h-3 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
           ) : syncError ? (
-            <span className="text-red-500 text-sm" title="Error al sincronizar — toque para reintentar">⚠</span>
+            <span className="text-red-500 text-sm">⚠</span>
           ) : enLinea ? (
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           ) : (
@@ -140,7 +150,7 @@ export function App() {
           <span className={`text-[10px] hidden sm:inline ${
             syncError ? 'text-red-500' : enLinea ? 'text-emerald-600' : 'text-slate-400'
           }`}>
-            {sincronizando ? 'Sync...' : syncError ? 'Error' : enLinea ? 'En línea' : 'Sin internet'}
+            {sincronizando ? 'Sync...' : syncError ? 'Ver error' : enLinea ? 'En línea' : 'Sin internet'}
           </span>
         </button>
       </header>
