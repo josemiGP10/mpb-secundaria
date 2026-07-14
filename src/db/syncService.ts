@@ -95,23 +95,20 @@ export async function sincronizarSubida(): Promise<SyncResult> {
     ['matriculas',        () => db.matriculas.toArray()],
   ];
 
-  // Tablas de trabajo: solo las modificadas desde la última sync
-  const trabajo: [string, () => Promise<unknown[]>][] = ultimaSync ? [
-    ['actividades_cognitivas', () => db.actividades_cognitivas.where('updated_at').above(ultimaSync).toArray()],
-    ['calificaciones',         () => db.calificaciones.where('updated_at').above(ultimaSync).toArray()],
-    ['notas_cognitivas',       () => db.notas_cognitivas.where('created_at').above(ultimaSync).toArray()],
-    ['registros_asistencia',   () => db.registros_asistencia.where('created_at').above(ultimaSync).toArray()],
-    ['secuencias',             () => db.secuencias.where('updated_at').above(ultimaSync).toArray()],
-    ['sesiones',               () => db.sesiones.where('updated_at').above(ultimaSync).toArray()],
-    ['registros_clase',        () => db.registros_clase.where('updated_at').above(ultimaSync).toArray()],
-  ] : [
-    ['actividades_cognitivas', () => db.actividades_cognitivas.toArray()],
-    ['calificaciones',         () => db.calificaciones.toArray()],
-    ['notas_cognitivas',       () => db.notas_cognitivas.toArray()],
-    ['registros_asistencia',   () => db.registros_asistencia.toArray()],
-    ['secuencias',             () => db.secuencias.toArray()],
-    ['sesiones',               () => db.sesiones.toArray()],
-    ['registros_clase',        () => db.registros_clase.toArray()],
+  // Filtro JS (sin requerir índices en Dexie)
+  const desde = ultimaSync;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const despues = (arr: any[], campo: string) =>
+    desde ? arr.filter((r: any) => (r[campo] as string) > desde) : arr;
+
+  const trabajo: [string, () => Promise<unknown[]>][] = [
+    ['actividades_cognitivas', async () => despues(await db.actividades_cognitivas.toArray(), 'updated_at')],
+    ['calificaciones',         async () => despues(await db.calificaciones.toArray(),         'updated_at')],
+    ['notas_cognitivas',       async () => despues(await db.notas_cognitivas.toArray(),       'created_at')],
+    ['registros_asistencia',   async () => despues(await db.registros_asistencia.toArray(),   'created_at')],
+    ['secuencias',             async () => despues(await db.secuencias.toArray(),             'updated_at')],
+    ['sesiones',               async () => despues(await db.sesiones.toArray(),               'updated_at')],
+    ['registros_clase',        async () => despues(await db.registros_clase.toArray(),        'updated_at')],
   ];
 
   for (const [tabla, getter] of [...catalogo, ...trabajo]) {
