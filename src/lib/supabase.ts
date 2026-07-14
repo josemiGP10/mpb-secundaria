@@ -1,10 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL as string;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-if (!url || !key) {
-  console.error('Faltan variables VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY en .env');
-}
+// Si las variables no están configuradas la app funciona offline sin sync.
+export const supabase: SupabaseClient | null = (url && key)
+  ? createClient(url, key)
+  : null;
 
-export const supabase = createClient(url, key);
+export const supabaseConfigurado = !!supabase;

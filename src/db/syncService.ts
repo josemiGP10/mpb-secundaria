@@ -15,12 +15,17 @@ import { db } from './database';
 const SYNC_TS_KEY = 'mpb_sec_last_sync';
 const BATCH       = 400;
 
+const NO_CONFIG: SyncResult = {
+  ok: false, total: 0, ts: new Date().toISOString(),
+  errores: ['Supabase no configurado: faltan VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel'],
+};
+
 // ── Helpers ────────────────────────────────────────────────
 
 async function subirTabla(tabla: string, rows: unknown[]): Promise<void> {
   if (rows.length === 0) return;
   for (let i = 0; i < rows.length; i += BATCH) {
-    const { error } = await supabase
+    const { error } = await supabase!
       .from(tabla)
       .upsert(rows.slice(i, i + BATCH) as object[], { onConflict: 'id' });
     if (error) throw new Error(`[${tabla}] ${error.message}`);
@@ -32,7 +37,7 @@ async function bajarTabla(tabla: string): Promise<unknown[]> {
   let desde = 0;
   const PG = 1000;
   while (true) {
-    const { data, error } = await supabase
+    const { data, error } = await supabase!
       .from(tabla)
       .select('*')
       .range(desde, desde + PG - 1);
@@ -55,6 +60,7 @@ export interface SyncResult {
 // ══════════════════════════════════════════════════════════
 
 export async function sincronizarSubida(): Promise<SyncResult> {
+  if (!supabase) return NO_CONFIG;
   const errores: string[] = [];
   let total = 0;
 
@@ -96,6 +102,7 @@ export async function sincronizarSubida(): Promise<SyncResult> {
 // ══════════════════════════════════════════════════════════
 
 export async function sincronizarBajada(): Promise<SyncResult> {
+  if (!supabase) return NO_CONFIG;
   const errores: string[] = [];
   let total = 0;
 
@@ -135,6 +142,7 @@ export async function sincronizarBajada(): Promise<SyncResult> {
 // Así cualquier dispositivo queda sincronizado con los demás.
 
 export async function sincronizarCompleto(): Promise<SyncResult> {
+  if (!supabase) return NO_CONFIG;
   const errores: string[] = [];
   let total = 0;
 
