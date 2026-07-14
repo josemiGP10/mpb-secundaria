@@ -133,7 +133,11 @@ export async function sincronizarBajada(): Promise<SyncResult> {
 }
 
 // ══════════════════════════════════════════════════════════
-//  SYNC COMPLETO: subida + bajada
+//  SYNC COMPLETO: BAJAR primero, luego SUBIR
+//
+//  Orden importa: si iPhone guardó 7.5 y PC tiene 5.0 por defecto,
+//  bajar primero trae el 7.5 al PC; luego el PC sube el 7.5.
+//  Si se subiera primero, el PC pisaría el 7.5 con su 5.0.
 // ══════════════════════════════════════════════════════════
 
 export async function sincronizarCompleto(): Promise<SyncResult> {
@@ -141,13 +145,15 @@ export async function sincronizarCompleto(): Promise<SyncResult> {
   const errores: string[] = [];
   let total = 0;
 
-  const subida = await sincronizarSubida();
-  total += subida.total;
-  errores.push(...subida.errores);
-
+  // 1. Bajar primero: local queda con lo más reciente de Supabase
   const bajada = await sincronizarBajada();
   total += bajada.total;
   errores.push(...bajada.errores);
+
+  // 2. Subir después: ya tenemos los datos correctos en local
+  const subida = await sincronizarSubida();
+  total += subida.total;
+  errores.push(...subida.errores);
 
   const ts = new Date().toISOString();
   if (errores.length === 0) localStorage.setItem(SYNC_TS_KEY, ts);
