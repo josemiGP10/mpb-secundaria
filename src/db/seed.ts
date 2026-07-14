@@ -406,8 +406,13 @@ const GRUPOS_MAP: { grupoId: string; estudiantes: Estudiante[] }[] = [
 // ── Seed principal (idempotente) ───────────────────────────
 
 export async function sembrarDatos(): Promise<void> {
-  // Migración: MEF groups siempre deben tener 2 semestres (no 4 períodos)
   const NOW_MIG = new Date().toISOString();
+
+  // Migración: corregir tipo de áreas (Informática = COMPLEMENTARIA, Matemáticas = BASICA)
+  await db.areas.update(IDS.AREA_INFORMATICA, { tipo: 'COMPLEMENTARIA' as const, updated_at: NOW_MIG });
+  await db.areas.update(IDS.AREA_MATEMATICAS, { tipo: 'BASICA'          as const, updated_at: NOW_MIG });
+
+  // Migración: MEF groups siempre deben tener 2 semestres (no 4 períodos)
   await db.grupos
     .where('id').anyOf([IDS.G_MEF67, IDS.G_MEF89, IDS.G_MEF1011])
     .modify({ num_periodos: 2, updated_at: NOW_MIG });
