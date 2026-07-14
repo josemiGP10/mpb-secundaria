@@ -128,7 +128,9 @@ export function App() {
             <span className="hidden sm:inline">Diario Pedagógico — I.E.R. Miguel Pinedo Barros</span>
             <span className="sm:hidden">Diario Pedagógico MPB</span>
           </h1>
-          <p className="text-[10px] text-slate-400 leading-none mt-0.5">J. Gonzalez · 2026</p>
+          <p className="text-[10px] text-slate-400 leading-none mt-0.5">
+            J. Gonzalez · {new Date(__BUILD_TIME__).toLocaleString('es-CO', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
+          </p>
         </div>
 
         {/* Indicador de sync */}
