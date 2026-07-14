@@ -57,7 +57,8 @@ export function AsistenciaView() {
     if (!grupoId) return [];
     const links = await db.grupo_asignaturas.where('grupo_id').equals(grupoId).toArray();
     if (links.length === 0) return db.asignaturas.toArray();
-    const ids = links.map((l) => l.asignatura_id);
+    // Dedup: múltiples registros con mismo asignatura_id por sync multi-dispositivo
+    const ids = [...new Set(links.map((l) => l.asignatura_id))];
     const all = (await db.asignaturas.bulkGet(ids)).filter((x): x is NonNullable<typeof x> => x != null);
     return all.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }, [grupoId, anio]);

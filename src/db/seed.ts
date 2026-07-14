@@ -5,6 +5,7 @@
 
 import { v4 as uuid } from 'uuid';
 import { db } from './database';
+import { supabase } from '@/lib/supabase';
 
 export const IDS = {
   AREA_INFORMATICA:  'area-info-001',
@@ -416,6 +417,29 @@ export async function sembrarDatos(): Promise<void> {
   await db.grupos
     .where('id').anyOf([IDS.G_MEF67, IDS.G_MEF89, IDS.G_MEF1011])
     .modify({ num_periodos: 2, updated_at: NOW_MIG });
+
+  // Migración: eliminar grupo_asignaturas duplicados (causados por seeds en multi-dispositivo)
+  // Cada par (grupo_id, asignatura_id) debe existir una sola vez.
+  {
+    const todos = await db.grupo_asignaturas.toArray();
+    const vistos = new Map<string, string>(); // clave → id a conservar
+    const aBorrar: string[] = [];
+    for (const ga of todos) {
+      const clave = `${ga.grupo_id}:${ga.asignatura_id}`;
+      if (vistos.has(clave)) {
+        aBorrar.push(ga.id);
+      } else {
+        vistos.set(clave, ga.id);
+      }
+    }
+    if (aBorrar.length > 0) {
+      await db.grupo_asignaturas.bulkDelete(aBorrar);
+      // Borrar también en Supabase para que la bajada no los traiga de vuelta
+      if (supabase) {
+        await supabase.from('grupo_asignaturas').delete().in('id', aBorrar);
+      }
+    }
+  }
 
   const existentes = await db.grupos.count();
   if (existentes > 0) return;

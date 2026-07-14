@@ -50,9 +50,18 @@ export async function getEstudiantesPorGrupo(grupoId: string, anio: number) {
     .where('[grupo_id+anio]').equals([grupoId, anio]).toArray();
   const ids = matriculas.map((m) => m.estudiante_id);
   const estudiantes = await db.estudiantes.bulkGet(ids);
+
+  // Dedup por doc: varios dispositivos sembraron IDs distintos para el mismo estudiante
+  const docVistos = new Set<string>();
   return matriculas
     .map((m, i) => ({ matricula: m, estudiante: estudiantes[i]! }))
-    .filter((r) => r.estudiante !== undefined)
+    .filter(({ estudiante }) => {
+      if (!estudiante) return false;
+      const clave = `${estudiante.tipo_doc}-${estudiante.doc}`;
+      if (docVistos.has(clave)) return false;
+      docVistos.add(clave);
+      return true;
+    })
     .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
 }
 
