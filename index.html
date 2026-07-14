@@ -14,6 +14,16 @@
   </head>
   <body class="bg-surface text-white antialiased">
     <div id="root"></div>
+    <script>
+      window.onerror = function(msg, src, line, col, err) {
+        document.getElementById('root').innerHTML =
+          '<div style="padding:20px;font-family:monospace;font-size:12px;background:#fff;color:#b91c1c;white-space:pre-wrap;word-break:break-all">'
+          + '<b>ERROR AL CARGAR LA APP:</b>\n\n'
+          + msg + '\n\nArchivo: ' + src + ':' + line
+          + '\n\nStack:\n' + (err && err.stack ? err.stack : 'no disponible')
+          + '\n\n<i>Copia este texto para diagnosticar.</i></div>';
+      };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
