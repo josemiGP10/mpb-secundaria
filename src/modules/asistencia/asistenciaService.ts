@@ -192,6 +192,69 @@ export async function toggleEstadoHoy(
   };
 }
 
+// ── Set directo (3 botones) ────────────────────────────────
+// Establece el estado exacto; si ya está activo lo borra (toggle off)
+
+export async function setEstadoDirecto(
+  fila:         FilaAsistencia,
+  asignaturaId: string,
+  fecha:        string,
+  estado:       EstadoAsistencia,
+): Promise<Pick<FilaAsistencia, 'estadoHoy' | 'registroIdHoy' | 'totalSesiones' | 'asistidas' | 'fi' | 'fj'>> {
+  const now = new Date().toISOString();
+  const siguiente: EstadoAsistencia | null = fila.estadoHoy === estado ? null : estado;
+
+  if (siguiente === null) {
+    if (fila.registroIdHoy) {
+      await db.registros_asistencia.delete(fila.registroIdHoy);
+    }
+    return {
+      estadoHoy:     null,
+      registroIdHoy: null,
+      totalSesiones: Math.max(0, fila.totalSesiones - 1),
+      asistidas:     fila.asistidas - (fila.estadoHoy === 'ASISTE' ? 1 : 0),
+      fi:            fila.fi        - (fila.estadoHoy === 'FI'     ? 1 : 0),
+      fj:            fila.fj        - (fila.estadoHoy === 'FJ'     ? 1 : 0),
+    };
+  }
+
+  let registroId = fila.registroIdHoy;
+  if (registroId) {
+    const existing = await db.registros_asistencia.get(registroId);
+    if (existing) {
+      await db.registros_asistencia.put({ ...existing, estado: siguiente, created_at: now });
+    }
+  } else {
+    const nuevo: RegistroAsistencia = {
+      id:            uuidv4(),
+      matricula_id:  fila.matriculaId,
+      asignatura_id: asignaturaId,
+      fecha,
+      hora_bloque:   1,
+      estado:        siguiente,
+      created_at:    now,
+    };
+    await db.registros_asistencia.add(nuevo);
+    registroId = nuevo.id;
+  }
+
+  const eraNull = fila.estadoHoy === null;
+  const delta = {
+    asistidas: (siguiente === 'ASISTE' ? 1 : 0) - (fila.estadoHoy === 'ASISTE' ? 1 : 0),
+    fi:        (siguiente === 'FI'     ? 1 : 0) - (fila.estadoHoy === 'FI'     ? 1 : 0),
+    fj:        (siguiente === 'FJ'     ? 1 : 0) - (fila.estadoHoy === 'FJ'     ? 1 : 0),
+  };
+
+  return {
+    estadoHoy:     siguiente,
+    registroIdHoy: registroId,
+    totalSesiones: fila.totalSesiones + (eraNull ? 1 : 0),
+    asistidas:     fila.asistidas + delta.asistidas,
+    fi:            fila.fi        + delta.fi,
+    fj:            fila.fj        + delta.fj,
+  };
+}
+
 // ── Toggle vista mes (edición de fechas pasadas) ───────────
 
 export async function toggleEstadoFecha(

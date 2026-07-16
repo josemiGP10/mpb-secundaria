@@ -24,7 +24,9 @@ export interface Estudiante {
   nombre1: string; nombre2: string; fecha_nacimiento: string; created_at: string; updated_at: string;
 }
 export interface Matricula {
-  id: string; estudiante_id: string; grupo_id: string; anio: number; activo: boolean; created_at: string; updated_at: string;
+  id: string; estudiante_id: string; grupo_id: string; anio: number; activo: boolean;
+  retiro_observaciones?: string;
+  created_at: string; updated_at: string;
 }
 export interface ActividadCognitiva {
   id: string; grupo_id: string; asignatura_id: string; periodo: number; anio: number;

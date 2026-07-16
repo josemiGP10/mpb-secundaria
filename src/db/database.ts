@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
+import { v4 as uuidv4 } from 'uuid';
 import type {
   Area, Asignatura, Grupo, GrupoAsignatura, Estudiante, Matricula,
   ActividadCognitiva, NotaCognitiva, Calificacion, RegistroAsistencia,
@@ -46,8 +47,10 @@ export const db = new SecundariaDB();
 // ── Helpers ────────────────────────────────────────────────
 
 export async function getEstudiantesPorGrupo(grupoId: string, anio: number) {
-  const matriculas = await db.matriculas
+  const todas = await db.matriculas
     .where('[grupo_id+anio]').equals([grupoId, anio]).toArray();
+  // Solo activos (activo !== false cubre registros antiguos sin el campo)
+  const matriculas = todas.filter(m => m.activo !== false);
   const ids = matriculas.map((m) => m.estudiante_id);
   const estudiantes = await db.estudiantes.bulkGet(ids);
 
@@ -63,6 +66,76 @@ export async function getEstudiantesPorGrupo(grupoId: string, anio: number) {
       return true;
     })
     .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+}
+
+export async function getEstudiantesRetiradosPorGrupo(grupoId: string, anio: number) {
+  const todas = await db.matriculas
+    .where('[grupo_id+anio]').equals([grupoId, anio]).toArray();
+  const matriculas = todas.filter(m => m.activo === false);
+  const ids = matriculas.map(m => m.estudiante_id);
+  const estudiantes = await db.estudiantes.bulkGet(ids);
+  const docVistos = new Set<string>();
+  return matriculas
+    .map((m, i) => ({ matricula: m, estudiante: estudiantes[i]! }))
+    .filter(({ estudiante }) => {
+      if (!estudiante) return false;
+      const clave = `${estudiante.tipo_doc}-${estudiante.doc}`;
+      if (docVistos.has(clave)) return false;
+      docVistos.add(clave);
+      return true;
+    })
+    .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+}
+
+export async function retirarEstudiante(matriculaId: string, observaciones?: string) {
+  const now = new Date().toISOString();
+  const m = await db.matriculas.get(matriculaId);
+  if (!m) throw new Error('Matrícula no encontrada');
+  await db.matriculas.put({ ...m, activo: false, retiro_observaciones: observaciones ?? '', updated_at: now });
+}
+
+export async function reactivarEstudiante(matriculaId: string) {
+  const now = new Date().toISOString();
+  const m = await db.matriculas.get(matriculaId);
+  if (!m) throw new Error('Matrícula no encontrada');
+  await db.matriculas.put({ ...m, activo: true, retiro_observaciones: undefined, updated_at: now });
+}
+
+export async function moverEstudianteAGrupo(matriculaId: string, nuevoGrupoId: string) {
+  const now = new Date().toISOString();
+  const m = await db.matriculas.get(matriculaId);
+  if (!m) throw new Error('Matrícula no encontrada');
+  await db.matriculas.put({ ...m, grupo_id: nuevoGrupoId, updated_at: now });
+}
+
+export async function agregarEstudianteNuevo(
+  datos: { tipo_doc: string; doc: string; apellido1: string; apellido2: string; nombre1: string; nombre2: string; fecha_nacimiento: string },
+  grupoId: string,
+  anio: number,
+) {
+  const now = new Date().toISOString();
+  const existente = await db.estudiantes
+    .where('[tipo_doc+doc]').equals([datos.tipo_doc, datos.doc]).first();
+  let estudianteId: string;
+  if (existente) {
+    estudianteId = existente.id;
+  } else {
+    estudianteId = uuidv4();
+    await db.estudiantes.add({ id: estudianteId, ...datos, created_at: now, updated_at: now });
+  }
+  const existeM = await db.matriculas
+    .where('[grupo_id+anio]').equals([grupoId, anio])
+    .filter(m => m.estudiante_id === estudianteId).first();
+  if (existeM) {
+    if (!existeM.activo) {
+      await db.matriculas.put({ ...existeM, activo: true, retiro_observaciones: undefined, updated_at: now });
+    }
+    return;
+  }
+  await db.matriculas.add({
+    id: uuidv4(), estudiante_id: estudianteId,
+    grupo_id: grupoId, anio, activo: true, created_at: now, updated_at: now,
+  });
 }
 
 export async function getCalificacion(

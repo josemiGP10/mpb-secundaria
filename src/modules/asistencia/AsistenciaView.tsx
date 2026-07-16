@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
-import type { EstadoAsistencia } from '@/db/types';
+import {
+  getEstudiantesRetiradosPorGrupo,
+  getEstudiantesPorGrupo,
+  retirarEstudiante,
+  reactivarEstudiante,
+  moverEstudianteAGrupo,
+  agregarEstudianteNuevo,
+} from '@/db/database';
+import type { EstadoAsistencia, Grupo, Matricula, Estudiante } from '@/db/types';
 import {
   cargarAsistenciaGrupo,
   cargarAsistenciaMes,
-  toggleEstadoHoy,
+  setEstadoDirecto,
   toggleEstadoFecha,
   tomarListaCompleta,
   type FilaAsistencia,
@@ -20,11 +28,10 @@ function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T
 
 // ============================================================
 //  PANTALLA: Asistencia
-//  Vista Día  — pasada de lista diaria (1 toggle por estudiante)
-//  Vista Mes  — grilla mes × estudiantes para editar historico
+//  Vista Día  — 3 botones por estudiante (Asiste / FJ / FI)
+//  Vista Mes  — grilla editable histórico
 // ============================================================
 
-// Usa hora local del dispositivo, no UTC, para evitar desfase en zonas UTC-
 function fechaLocal(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -43,11 +50,12 @@ type Vista = 'dia' | 'mes';
 export function AsistenciaView() {
   const anio = HOY_ANIO;
 
-  const [vista,        setVista]        = useState<Vista>('dia');
-  const [grupoId,      setGrupoId]      = useState('');
-  const [asignaturaId, setAsignaturaId] = useState('');
-  const [fecha,        setFecha]        = useState(HOY);
-  const [mes,          setMes]          = useState(HOY_MES);
+  const [vista,          setVista]          = useState<Vista>('dia');
+  const [grupoId,        setGrupoId]        = useState('');
+  const [asignaturaId,   setAsignaturaId]   = useState('');
+  const [fecha,          setFecha]          = useState(HOY);
+  const [mes,            setMes]            = useState(HOY_MES);
+  const [modalGestionar, setModalGestionar] = useState(false);
 
   const grupos = useLiveQuery(async () => {
     return db.grupos.where('anio').equals(anio).toArray();
@@ -57,7 +65,6 @@ export function AsistenciaView() {
     if (!grupoId) return [];
     const links = await db.grupo_asignaturas.where('grupo_id').equals(grupoId).toArray();
     if (links.length === 0) return db.asignaturas.toArray();
-    // Dedup: múltiples registros con mismo asignatura_id por sync multi-dispositivo
     const ids = [...new Set(links.map((l) => l.asignatura_id))];
     const all = (await db.asignaturas.bulkGet(ids)).filter((x): x is NonNullable<typeof x> => x != null);
     return all.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
@@ -68,8 +75,8 @@ export function AsistenciaView() {
   const [loading, setLoading] = useState(false);
 
   // ── Estado vista mes ───────────────────────────────────
-  const [grilla,      setGrilla]      = useState<{ filas: FilaMes[]; fechas: string[] } | null>(null);
-  const [loadingMes,  setLoadingMes]  = useState(false);
+  const [grilla,     setGrilla]     = useState<{ filas: FilaMes[]; fechas: string[] } | null>(null);
+  const [loadingMes, setLoadingMes] = useState(false);
 
   const [busy, setBusy] = useState(false);
 
@@ -93,12 +100,12 @@ export function AsistenciaView() {
       .finally(() => setLoadingMes(false));
   }, [vista, grupoId, asignaturaId, mes, anio]);
 
-  // ── Toggle vista día ───────────────────────────────────
-  const handleToggleDia = async (fila: FilaAsistencia) => {
+  // ── Set estado directo (3 botones) ─────────────────────
+  const handleSetEstadoDia = async (fila: FilaAsistencia, estado: EstadoAsistencia) => {
     if (busy) return;
     setBusy(true);
     try {
-      const actualizado = await toggleEstadoHoy(fila, asignaturaId, fecha);
+      const actualizado = await setEstadoDirecto(fila, asignaturaId, fecha, estado);
       setFilas((prev) =>
         prev.map((f) => f.matriculaId === fila.matriculaId ? { ...f, ...actualizado } : f),
       );
@@ -146,6 +153,16 @@ export function AsistenciaView() {
     }
   };
 
+  // ── Recargar lista tras cambios en el modal ────────────
+  const recargarDia = () => {
+    if (!grupoId || !asignaturaId) return;
+    setLoading(true);
+    cargarAsistenciaGrupo(grupoId, anio, asignaturaId, fecha)
+      .then(setFilas)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  };
+
   // ── Render ─────────────────────────────────────────────
   if (!grupos || !asignaturas) return <CenteredMsg>Cargando...</CenteredMsg>;
   if (grupos.length === 0) {
@@ -158,13 +175,13 @@ export function AsistenciaView() {
   return (
     <div className="flex flex-col h-full">
 
-      {/* ── Barra de selectores — 2 filas compactas ── */}
+      {/* ── Barra de selectores ── */}
       <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-surface-muted bg-surface-card flex-shrink-0">
-        {/* Fila 1: grupo + asignatura */}
+        {/* Fila 1: grupo + asignatura + gestionar */}
         <div className="flex gap-1.5">
           <select
             value={grupoId}
-            onChange={(e) => { setGrupoId(e.target.value); setAsignaturaId(''); }}
+            onChange={(e) => { setGrupoId(e.target.value); setAsignaturaId(''); setModalGestionar(false); }}
             className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
           >
             <option value="">— Grupo —</option>
@@ -183,6 +200,14 @@ export function AsistenciaView() {
               <option key={a.id} value={a.id}>{a.nombre}</option>
             ))}
           </select>
+          <button
+            onClick={() => setModalGestionar(true)}
+            disabled={!grupoId}
+            title="Gestionar estudiantes del grupo"
+            className="flex-shrink-0 px-2.5 py-1.5 rounded-lg border border-slate-300 text-base leading-none text-slate-600 hover:bg-slate-100 disabled:opacity-40 transition-colors"
+          >
+            👥
+          </button>
         </div>
         {/* Fila 2: vista + fecha/mes + tomar lista */}
         <div className="flex items-center gap-1.5">
@@ -227,14 +252,11 @@ export function AsistenciaView() {
       {/* ── Barra de estadísticas (vista día) ── */}
       {vista === 'dia' && grupoId && asignaturaId && filas.length > 0 && (
         <div className="flex items-center gap-4 px-4 py-2 bg-slate-100 border-b border-surface-muted flex-shrink-0">
-          <StatChip label="Total"       value={filas.length}                                           color="slate"   />
-          <StatChip label="Asisten"     value={filas.filter((f) => f.estadoHoy === 'ASISTE').length}   color="emerald" />
-          <StatChip label="F.J."        value={filas.filter((f) => f.estadoHoy === 'FJ').length}       color="yellow"  />
-          <StatChip label="F.I."        value={filas.filter((f) => f.estadoHoy === 'FI').length}       color="red"     />
-          <StatChip label="Sin registro" value={sinRegistroHoy}                                        color="slate"   />
-          <span className="ml-auto text-[10px] text-slate-600 hidden sm:block">
-            Cicla: + Registrar → Asiste → F.J. → F.I. → (borra)
-          </span>
+          <StatChip label="Total"        value={filas.length}                                           color="slate"   />
+          <StatChip label="Asisten"      value={filas.filter((f) => f.estadoHoy === 'ASISTE').length}   color="emerald" />
+          <StatChip label="F.J."         value={filas.filter((f) => f.estadoHoy === 'FJ').length}       color="yellow"  />
+          <StatChip label="F.I."         value={filas.filter((f) => f.estadoHoy === 'FI').length}       color="red"     />
+          <StatChip label="Sin registro" value={sinRegistroHoy}                                         color="slate"   />
         </div>
       )}
 
@@ -249,7 +271,7 @@ export function AsistenciaView() {
             {loading && <CenteredMsg>Cargando...</CenteredMsg>}
             {!loading && filas.length === 0 && <CenteredMsg>No hay estudiantes en este grupo.</CenteredMsg>}
             {!loading && filas.length > 0 && (
-              <DayTable filas={filas} busy={busy} onToggle={handleToggleDia} />
+              <DayTable filas={filas} busy={busy} onSetEstado={handleSetEstadoDia} />
             )}
           </>
         )}
@@ -270,6 +292,18 @@ export function AsistenciaView() {
           </>
         )}
       </div>
+
+      {/* ── Modal gestión de estudiantes ── */}
+      {modalGestionar && grupoId && grupos && (
+        <GestionarEstudiantesModal
+          grupoId={grupoId}
+          grupoNombre={grupos.find(g => g.id === grupoId)?.nombre ?? ''}
+          anio={anio}
+          grupos={sortGrupos(grupos)}
+          onClose={() => setModalGestionar(false)}
+          onCambio={recargarDia}
+        />
+      )}
     </div>
   );
 }
@@ -277,11 +311,11 @@ export function AsistenciaView() {
 // ── DayTable ───────────────────────────────────────────────
 
 function DayTable({
-  filas, busy, onToggle,
+  filas, busy, onSetEstado,
 }: {
   filas: FilaAsistencia[];
   busy: boolean;
-  onToggle: (f: FilaAsistencia) => void;
+  onSetEstado: (f: FilaAsistencia, estado: EstadoAsistencia) => void;
 }) {
   const registrados = filas.filter((f) => f.estadoHoy !== null).length;
   return (
@@ -291,8 +325,9 @@ function DayTable({
           <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium border-b border-surface-muted">
             Estudiante
           </th>
-          <th className="text-center px-4 py-2.5 text-xs text-slate-400 font-medium border-b border-surface-muted w-32">
-            Estado hoy
+          <th className="text-center px-2 py-2.5 text-xs text-slate-400 font-medium border-b border-surface-muted w-36">
+            <span className="hidden sm:inline">Asiste · FJ · FI</span>
+            <span className="sm:hidden">A · FJ · FI</span>
           </th>
           <th className="text-center px-4 py-2.5 text-xs text-slate-400 font-medium border-b border-surface-muted">
             Histórico
@@ -306,7 +341,7 @@ function DayTable({
             fila={fila}
             idx={i}
             busy={busy}
-            onToggle={() => onToggle(fila)}
+            onSetEstado={(estado) => onSetEstado(fila, estado)}
           />
         ))}
       </tbody>
@@ -329,8 +364,9 @@ function nombreCorto(nombreCompleto: string): string {
   return `${apellidos} ${inicialNombre}.`;
 }
 
-function DayRow({ fila, idx, busy, onToggle }: {
-  fila: FilaAsistencia; idx: number; busy: boolean; onToggle: () => void;
+function DayRow({ fila, idx, busy, onSetEstado }: {
+  fila: FilaAsistencia; idx: number; busy: boolean;
+  onSetEstado: (estado: EstadoAsistencia) => void;
 }) {
   const pct = fila.totalSesiones > 0
     ? Math.round((fila.asistidas / fila.totalSesiones) * 100)
@@ -342,8 +378,8 @@ function DayRow({ fila, idx, busy, onToggle }: {
         <span className="sm:hidden text-slate-900">{nombreCorto(fila.nombreCompleto)}</span>
         <span className="hidden sm:inline text-slate-900">{fila.nombreCompleto}</span>
       </td>
-      <td className="text-center px-2 py-1.5">
-        <EstadoBtn estado={fila.estadoHoy} disabled={busy} onClick={onToggle} />
+      <td className="text-center px-1 py-1.5">
+        <EstadoBtns estado={fila.estadoHoy} disabled={busy} onChange={onSetEstado} />
       </td>
       <td className="text-center px-3 py-2">
         {fila.totalSesiones === 0 ? (
@@ -411,13 +447,10 @@ function MesGrid({ grilla, busy, onToggle }: {
 
             return (
               <tr key={fila.matriculaId} className={`border-b border-surface-muted/50 ${i % 2 !== 0 ? 'bg-slate-50' : ''}`}>
-                {/* Nombre — sticky */}
                 <td className={`sticky left-0 z-10 ${bgBase} px-2 py-2 text-xs border-r border-surface-muted/30 min-w-[90px] sm:min-w-[160px]`}>
                   <span className="sm:hidden text-slate-900">{nombreCorto(fila.nombreCompleto)}</span>
                   <span className="hidden sm:inline text-slate-900 truncate block max-w-[155px]">{fila.nombreCompleto}</span>
                 </td>
-
-                {/* Celdas de cada fecha */}
                 {fechas.map((f) => {
                   const est = fila.estados.get(f) ?? null;
                   return (
@@ -430,8 +463,6 @@ function MesGrid({ grilla, busy, onToggle }: {
                     </td>
                   );
                 })}
-
-                {/* Resumen mensual */}
                 <td className="text-center px-2 py-1 border-l border-surface-muted/30">
                   {total === 0 ? (
                     <span className="text-slate-400">—</span>
@@ -458,40 +489,40 @@ function MesGrid({ grilla, busy, onToggle }: {
   );
 }
 
-// ── EstadoBtn (vista día) ──────────────────────────────────
+// ── EstadoBtns: 3 botones directos ────────────────────────
 
-const BTN_STYLES: Record<EstadoAsistencia, string> = {
-  ASISTE: 'bg-emerald-100 hover:bg-emerald-200 text-emerald-700 border-emerald-300',
-  FJ:     'bg-yellow-100 hover:bg-yellow-200 text-yellow-700 border-yellow-300',
-  FI:     'bg-red-100    hover:bg-red-200    text-red-700    border-red-300',
-};
-const BTN_NULL = 'bg-white hover:bg-slate-100 text-slate-500 border-slate-300 border-dashed';
-const BTN_LABELS: Record<EstadoAsistencia, string> = {
-  ASISTE: '✓ Asiste',
-  FJ:     'F. Just.',
-  FI:     'F. Inj. ×',
-};
-
-function EstadoBtn({ estado, disabled, onClick }: {
-  estado: EstadoAsistencia | null; disabled: boolean; onClick: () => void;
+function EstadoBtns({ estado, disabled, onChange }: {
+  estado: EstadoAsistencia | null;
+  disabled: boolean;
+  onChange: (e: EstadoAsistencia) => void;
 }) {
-  return (
+  const btn = (e: EstadoAsistencia, label: string, activeClass: string) => (
     <button
-      onClick={onClick}
+      key={e}
+      onClick={() => onChange(e)}
       disabled={disabled}
-      title={estado === 'FI' ? 'Toque de nuevo para borrar el registro' : undefined}
+      title={estado === e ? 'Toque de nuevo para quitar el registro' : undefined}
       className={`
-        px-3 py-1.5 rounded-lg border font-semibold text-xs transition-all
-        active:scale-95 disabled:opacity-60
-        ${estado === null ? BTN_NULL : BTN_STYLES[estado]}
+        w-9 h-8 rounded-lg border font-bold text-[11px] transition-all active:scale-95 disabled:opacity-50
+        ${estado === e
+          ? activeClass
+          : 'bg-white text-slate-300 border-slate-300 hover:text-slate-500 hover:border-slate-400'
+        }
       `}
     >
-      {estado === null ? '+ Registrar' : BTN_LABELS[estado]}
+      {label}
     </button>
+  );
+  return (
+    <div className="flex gap-1 justify-center">
+      {btn('ASISTE', '✓',  'bg-emerald-100 text-emerald-700 border-emerald-400')}
+      {btn('FJ',     'FJ', 'bg-yellow-100 text-yellow-700 border-yellow-400')}
+      {btn('FI',     '×',  'bg-red-100 text-red-700 border-red-400')}
+    </div>
   );
 }
 
-// ── CeldaMes (vista mes) ───────────────────────────────────
+// ── CeldaMes (vista mes — ciclo) ───────────────────────────
 
 const CELDA_STYLES: Record<EstadoAsistencia, string> = {
   ASISTE: 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200',
@@ -528,6 +559,310 @@ function CeldaMes({ estado, disabled, onClick }: {
   );
 }
 
+// ── GestionarEstudiantesModal ──────────────────────────────
+
+type AccionEst =
+  | { tipo: 'mover';   matriculaId: string; nombre: string }
+  | { tipo: 'retirar'; matriculaId: string; nombre: string }
+  | null;
+
+const FORM_VACIO = {
+  tipo_doc: 'T', doc: '', apellido1: '', apellido2: '',
+  nombre1: '', nombre2: '', fecha_nacimiento: '',
+};
+
+function GestionarEstudiantesModal({
+  grupoId, grupoNombre, anio, grupos, onClose, onCambio,
+}: {
+  grupoId:      string;
+  grupoNombre:  string;
+  anio:         number;
+  grupos:       Grupo[];
+  onClose:      () => void;
+  onCambio:     () => void;
+}) {
+  const [activos,           setActivos]           = useState<{ matricula: Matricula; estudiante: Estudiante }[]>([]);
+  const [retirados,         setRetirados]         = useState<{ matricula: Matricula; estudiante: Estudiante }[]>([]);
+  const [accion,            setAccion]            = useState<AccionEst>(null);
+  const [mostrarRetirados,  setMostrarRetirados]  = useState(false);
+  const [mostrarFormNuevo,  setMostrarFormNuevo]  = useState(false);
+  const [destGrupoId,       setDestGrupoId]       = useState('');
+  const [retiroObs,         setRetiroObs]         = useState('');
+  const [formNuevo,         setFormNuevo]         = useState({ ...FORM_VACIO });
+  const [guardando,         setGuardando]         = useState(false);
+
+  const cargar = async () => {
+    const [a, r] = await Promise.all([
+      getEstudiantesPorGrupo(grupoId, anio),
+      getEstudiantesRetiradosPorGrupo(grupoId, anio),
+    ]);
+    setActivos(a);
+    setRetirados(r);
+  };
+
+  useEffect(() => { cargar(); }, [grupoId, anio]);
+
+  const wrap = async (fn: () => Promise<void>) => {
+    if (guardando) return;
+    setGuardando(true);
+    try { await fn(); await cargar(); onCambio(); }
+    catch (e) { alert('Error: ' + String(e)); }
+    finally { setGuardando(false); }
+  };
+
+  const handleMover = () => wrap(async () => {
+    if (!accion || accion.tipo !== 'mover' || !destGrupoId) return;
+    await moverEstudianteAGrupo(accion.matriculaId, destGrupoId);
+    setAccion(null);
+    setDestGrupoId('');
+  });
+
+  const handleRetirar = () => wrap(async () => {
+    if (!accion || accion.tipo !== 'retirar') return;
+    await retirarEstudiante(accion.matriculaId, retiroObs);
+    setAccion(null);
+    setRetiroObs('');
+  });
+
+  const handleReactivar = (matriculaId: string) => wrap(async () => {
+    await reactivarEstudiante(matriculaId);
+  });
+
+  const handleAgregar = () => wrap(async () => {
+    if (!formNuevo.doc || !formNuevo.apellido1 || !formNuevo.nombre1) return;
+    await agregarEstudianteNuevo(formNuevo, grupoId, anio);
+    setMostrarFormNuevo(false);
+    setFormNuevo({ ...FORM_VACIO });
+  });
+
+  const gruposDestino = grupos.filter(g => g.id !== grupoId);
+
+  const formatNombreEst = (e: Estudiante) =>
+    [e.apellido1, e.apellido2, e.nombre1, e.nombre2].filter(Boolean).join(' ');
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex flex-col justify-end sm:justify-center sm:items-center">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl sm:max-w-lg sm:w-full max-h-[90dvh] flex flex-col shadow-2xl">
+
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 flex-shrink-0">
+          <h2 className="flex-1 font-bold text-slate-900 text-sm">
+            Estudiantes — {grupoNombre}
+          </h2>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700 text-lg leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
+
+          {/* ── Activos ── */}
+          <section>
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+              Activos ({activos.length})
+            </h3>
+            {activos.length === 0 && (
+              <p className="text-xs text-slate-400 italic">Sin estudiantes activos.</p>
+            )}
+            <ul className="flex flex-col gap-1.5">
+              {activos.map(({ matricula, estudiante }) => {
+                const nombre = formatNombreEst(estudiante);
+                const enAccion = accion?.matriculaId === matricula.id;
+                return (
+                  <li key={matricula.id} className="rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2.5">
+                      <span className="flex-1 text-xs text-slate-800 font-medium leading-snug">{nombre}</span>
+                      {!enAccion && (
+                        <div className="flex gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => { setAccion({ tipo: 'mover', matriculaId: matricula.id, nombre }); setDestGrupoId(''); }}
+                            className="px-2.5 py-1 text-[10px] rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 font-medium"
+                          >Mover</button>
+                          <button
+                            onClick={() => { setAccion({ tipo: 'retirar', matriculaId: matricula.id, nombre }); setRetiroObs(''); }}
+                            className="px-2.5 py-1 text-[10px] rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium"
+                          >Retirar</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Acción mover */}
+                    {enAccion && accion!.tipo === 'mover' && (
+                      <div className="border-t border-blue-100 bg-blue-50 px-3 py-2.5 flex flex-col gap-2">
+                        <p className="text-[10px] text-blue-700 font-semibold">Mover a:</p>
+                        <select
+                          value={destGrupoId}
+                          onChange={e => setDestGrupoId(e.target.value)}
+                          className="text-xs border border-blue-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-blue-500"
+                        >
+                          <option value="">— Seleccionar grupo destino —</option>
+                          {gruposDestino.map(g => (
+                            <option key={g.id} value={g.id}>{g.nombre}</option>
+                          ))}
+                        </select>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleMover}
+                            disabled={!destGrupoId || guardando}
+                            className="px-3 py-1 text-xs rounded-lg bg-blue-600 text-white font-medium disabled:opacity-50"
+                          >{guardando ? '...' : 'Confirmar'}</button>
+                          <button
+                            onClick={() => { setAccion(null); setDestGrupoId(''); }}
+                            className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-600"
+                          >Cancelar</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Acción retirar */}
+                    {enAccion && accion!.tipo === 'retirar' && (
+                      <div className="border-t border-red-100 bg-red-50 px-3 py-2.5 flex flex-col gap-2">
+                        <p className="text-[10px] text-red-700 font-semibold">Confirmar retiro de <span className="font-bold">{accion!.nombre}</span>:</p>
+                        <input
+                          type="text"
+                          placeholder="Motivo u observación (opcional)"
+                          value={retiroObs}
+                          onChange={e => setRetiroObs(e.target.value)}
+                          className="text-xs border border-red-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-red-400"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleRetirar}
+                            disabled={guardando}
+                            className="px-3 py-1 text-xs rounded-lg bg-red-600 text-white font-medium disabled:opacity-50"
+                          >{guardando ? '...' : 'Retirar'}</button>
+                          <button
+                            onClick={() => { setAccion(null); setRetiroObs(''); }}
+                            className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-600"
+                          >Cancelar</button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          {/* ── Agregar nuevo ── */}
+          <section>
+            {!mostrarFormNuevo ? (
+              <button
+                onClick={() => setMostrarFormNuevo(true)}
+                className="w-full py-2.5 rounded-xl border-2 border-dashed border-emerald-300 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 transition-colors"
+              >
+                + Agregar estudiante nuevo
+              </button>
+            ) : (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 flex flex-col gap-2">
+                <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">Nuevo estudiante en {grupoNombre}</p>
+                <div className="flex gap-1.5">
+                  <select
+                    value={formNuevo.tipo_doc}
+                    onChange={e => setFormNuevo(f => ({ ...f, tipo_doc: e.target.value }))}
+                    className="w-16 text-xs border border-emerald-300 rounded-lg px-1.5 py-1.5 bg-white focus:outline-none"
+                  >
+                    {['T','C','PPT','CEX','RC'].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <input
+                    type="text" placeholder="Documento *" value={formNuevo.doc}
+                    onChange={e => setFormNuevo(f => ({ ...f, doc: e.target.value }))}
+                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text" placeholder="Apellido 1 *" value={formNuevo.apellido1}
+                    onChange={e => setFormNuevo(f => ({ ...f, apellido1: e.target.value.toUpperCase() }))}
+                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  />
+                  <input
+                    type="text" placeholder="Apellido 2" value={formNuevo.apellido2}
+                    onChange={e => setFormNuevo(f => ({ ...f, apellido2: e.target.value.toUpperCase() }))}
+                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text" placeholder="Nombre 1 *" value={formNuevo.nombre1}
+                    onChange={e => setFormNuevo(f => ({ ...f, nombre1: e.target.value.toUpperCase() }))}
+                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  />
+                  <input
+                    type="text" placeholder="Nombre 2" value={formNuevo.nombre2}
+                    onChange={e => setFormNuevo(f => ({ ...f, nombre2: e.target.value.toUpperCase() }))}
+                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  />
+                </div>
+                <input
+                  type="date" value={formNuevo.fecha_nacimiento}
+                  onChange={e => setFormNuevo(f => ({ ...f, fecha_nacimiento: e.target.value }))}
+                  className="text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAgregar}
+                    disabled={!formNuevo.doc || !formNuevo.apellido1 || !formNuevo.nombre1 || guardando}
+                    className="px-3 py-1 text-xs rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-50"
+                  >{guardando ? '...' : 'Guardar'}</button>
+                  <button
+                    onClick={() => { setMostrarFormNuevo(false); setFormNuevo({ ...FORM_VACIO }); }}
+                    className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-600"
+                  >Cancelar</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* ── Retirados ── */}
+          {retirados.length > 0 && (
+            <section>
+              <button
+                onClick={() => setMostrarRetirados(v => !v)}
+                className="flex items-center gap-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wide mb-2"
+              >
+                <span>{mostrarRetirados ? '▼' : '▶'}</span>
+                Retirados ({retirados.length})
+              </button>
+              {mostrarRetirados && (
+                <ul className="flex flex-col gap-1.5">
+                  {retirados.map(({ matricula, estudiante }) => {
+                    const nombre = formatNombreEst(estudiante);
+                    return (
+                      <li key={matricula.id} className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-slate-400 line-through leading-snug">{nombre}</p>
+                          {matricula.retiro_observaciones && (
+                            <p className="text-[10px] text-slate-400 mt-0.5 italic">{matricula.retiro_observaciones}</p>
+                          )}
+                        </div>
+                        <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md flex-shrink-0">
+                          RETIRADO
+                        </span>
+                        <button
+                          onClick={() => handleReactivar(matricula.id)}
+                          disabled={guardando}
+                          className="text-[10px] px-2 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-medium disabled:opacity-50 flex-shrink-0"
+                        >
+                          Reactivar
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Helpers de UI ──────────────────────────────────────────
 
 function VistaBtn({ active, onClick, children }: {
@@ -558,7 +893,6 @@ function StatChip({ label, value, color }: {
     </div>
   );
 }
-
 
 function CenteredMsg({ children, dimmer }: { children: React.ReactNode; dimmer?: boolean }) {
   return (
