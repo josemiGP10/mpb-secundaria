@@ -697,7 +697,7 @@ function GestionarEstudiantesModal({
                         <select
                           value={destGrupoId}
                           onChange={e => setDestGrupoId(e.target.value)}
-                          className="text-xs border border-blue-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-blue-500"
+                          className="text-xs text-slate-900 border border-blue-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-blue-500"
                         >
                           <option value="">— Seleccionar grupo destino —</option>
                           {gruposDestino.map(g => (
@@ -727,7 +727,7 @@ function GestionarEstudiantesModal({
                           placeholder="Motivo u observación (opcional)"
                           value={retiroObs}
                           onChange={e => setRetiroObs(e.target.value)}
-                          className="text-xs border border-red-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-red-400"
+                          className="text-xs text-slate-900 border border-red-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-red-400"
                         />
                         <div className="flex gap-2">
                           <button
@@ -764,44 +764,44 @@ function GestionarEstudiantesModal({
                   <select
                     value={formNuevo.tipo_doc}
                     onChange={e => setFormNuevo(f => ({ ...f, tipo_doc: e.target.value }))}
-                    className="w-16 text-xs border border-emerald-300 rounded-lg px-1.5 py-1.5 bg-white focus:outline-none"
+                    className="w-16 text-xs text-slate-900 border border-emerald-300 rounded-lg px-1.5 py-1.5 bg-white focus:outline-none"
                   >
                     {['T','C','PPT','CEX','RC'].map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <input
                     type="text" placeholder="Documento *" value={formNuevo.doc}
                     onChange={e => setFormNuevo(f => ({ ...f, doc: e.target.value }))}
-                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                    className="flex-1 text-xs text-slate-900 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                   />
                 </div>
                 <div className="flex gap-1.5">
                   <input
                     type="text" placeholder="Apellido 1 *" value={formNuevo.apellido1}
                     onChange={e => setFormNuevo(f => ({ ...f, apellido1: e.target.value.toUpperCase() }))}
-                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                    className="flex-1 text-xs text-slate-900 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                   />
                   <input
                     type="text" placeholder="Apellido 2" value={formNuevo.apellido2}
                     onChange={e => setFormNuevo(f => ({ ...f, apellido2: e.target.value.toUpperCase() }))}
-                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                    className="flex-1 text-xs text-slate-900 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                   />
                 </div>
                 <div className="flex gap-1.5">
                   <input
                     type="text" placeholder="Nombre 1 *" value={formNuevo.nombre1}
                     onChange={e => setFormNuevo(f => ({ ...f, nombre1: e.target.value.toUpperCase() }))}
-                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                    className="flex-1 text-xs text-slate-900 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                   />
                   <input
                     type="text" placeholder="Nombre 2" value={formNuevo.nombre2}
                     onChange={e => setFormNuevo(f => ({ ...f, nombre2: e.target.value.toUpperCase() }))}
-                    className="flex-1 text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                    className="flex-1 text-xs text-slate-900 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                   />
                 </div>
                 <input
                   type="date" value={formNuevo.fecha_nacimiento}
                   onChange={e => setFormNuevo(f => ({ ...f, fecha_nacimiento: e.target.value }))}
-                  className="text-xs border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  className="text-xs text-slate-900 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                 />
                 <div className="flex gap-2">
                   <button
