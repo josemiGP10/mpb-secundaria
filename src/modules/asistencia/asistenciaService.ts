@@ -52,6 +52,15 @@ export async function cargarAsistenciaGrupo(
     getEstudiantesRetiradosPorGrupo(grupoId, anio),
   ]);
 
+  // Si hay matrículas duplicadas (siembra multi-dispositivo), un mismo estudiante
+  // puede aparecer como activo Y retirado. La versión retirada tiene precedencia.
+  const retiradosKeys = new Set(
+    paresRetirados.map(p => `${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
+  );
+  const activosFiltrados = paresActivos.filter(
+    p => !retiradosKeys.has(`${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
+  );
+
   const todosRegistros = await db.registros_asistencia
     .where('[matricula_id+asignatura_id+fecha]')
     .between(
@@ -91,8 +100,8 @@ export async function cargarAsistenciaGrupo(
   };
 
   return [
-    ...paresActivos.map(p  => buildFila(p, false)),
-    ...paresRetirados.map(p => buildFila(p, true)),
+    ...activosFiltrados.map(p => buildFila(p, false)),
+    ...paresRetirados.map(p   => buildFila(p, true)),
   ];
 }
 
@@ -104,7 +113,16 @@ export async function cargarAsistenciaMes(
   asignaturaId: string,
   mes:          number, // 1–12
 ): Promise<{ filas: FilaMes[]; fechas: string[] }> {
-  const pares  = await getEstudiantesPorGrupo(grupoId, anio);
+  const [paresRaw, retiradosMes] = await Promise.all([
+    getEstudiantesPorGrupo(grupoId, anio),
+    getEstudiantesRetiradosPorGrupo(grupoId, anio),
+  ]);
+  const retiradosKeysMes = new Set(
+    retiradosMes.map(p => `${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
+  );
+  const pares = paresRaw.filter(
+    p => !retiradosKeysMes.has(`${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
+  );
   const mesStr = String(mes).padStart(2, '0');
   const desde  = `${anio}-${mesStr}-01`;
   const hasta  = `${anio}-${mesStr}-31`;
