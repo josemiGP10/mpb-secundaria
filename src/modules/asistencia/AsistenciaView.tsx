@@ -169,8 +169,9 @@ export function AsistenciaView() {
     return <CenteredMsg>No hay grupos registrados. Verifique la base de datos.</CenteredMsg>;
   }
 
-  const sinRegistroHoy = filas.filter((f) => f.estadoHoy === null).length;
-  const listaTomada    = filas.length > 0 && sinRegistroHoy === 0;
+  const filasActivas   = filas.filter((f) => !f.retirado);
+  const sinRegistroHoy = filasActivas.filter((f) => f.estadoHoy === null).length;
+  const listaTomada    = filasActivas.length > 0 && sinRegistroHoy === 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -252,11 +253,11 @@ export function AsistenciaView() {
       {/* ── Barra de estadísticas (vista día) ── */}
       {vista === 'dia' && grupoId && asignaturaId && filas.length > 0 && (
         <div className="flex items-center gap-4 px-4 py-2 bg-slate-100 border-b border-surface-muted flex-shrink-0">
-          <StatChip label="Total"        value={filas.length}                                           color="slate"   />
-          <StatChip label="Asisten"      value={filas.filter((f) => f.estadoHoy === 'ASISTE').length}   color="emerald" />
-          <StatChip label="F.J."         value={filas.filter((f) => f.estadoHoy === 'FJ').length}       color="yellow"  />
-          <StatChip label="F.I."         value={filas.filter((f) => f.estadoHoy === 'FI').length}       color="red"     />
-          <StatChip label="Sin registro" value={sinRegistroHoy}                                         color="slate"   />
+          <StatChip label="Total"        value={filasActivas.length}                                           color="slate"   />
+          <StatChip label="Asisten"      value={filasActivas.filter((f) => f.estadoHoy === 'ASISTE').length} color="emerald" />
+          <StatChip label="F.J."         value={filasActivas.filter((f) => f.estadoHoy === 'FJ').length}     color="yellow"  />
+          <StatChip label="F.I."         value={filasActivas.filter((f) => f.estadoHoy === 'FI').length}     color="red"     />
+          <StatChip label="Sin registro" value={sinRegistroHoy}                                              color="slate"   />
         </div>
       )}
 
@@ -317,7 +318,10 @@ function DayTable({
   busy: boolean;
   onSetEstado: (f: FilaAsistencia, estado: EstadoAsistencia) => void;
 }) {
-  const registrados = filas.filter((f) => f.estadoHoy !== null).length;
+  const activos   = filas.filter(f => !f.retirado);
+  const retirados = filas.filter(f => f.retirado);
+  const registrados = activos.filter(f => f.estadoHoy !== null).length;
+
   return (
     <table className="w-full border-collapse text-sm">
       <thead className="sticky top-0 z-10 bg-surface-card">
@@ -335,7 +339,7 @@ function DayTable({
         </tr>
       </thead>
       <tbody>
-        {filas.map((fila, i) => (
+        {activos.map((fila, i) => (
           <DayRow
             key={fila.matriculaId}
             fila={fila}
@@ -344,11 +348,33 @@ function DayTable({
             onSetEstado={(estado) => onSetEstado(fila, estado)}
           />
         ))}
+
+        {retirados.length > 0 && (
+          <>
+            <tr>
+              <td colSpan={3} className="px-4 py-1.5 bg-slate-100 border-y border-slate-200">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Retirados ({retirados.length}) — solo lectura
+                </span>
+              </td>
+            </tr>
+            {retirados.map((fila, i) => (
+              <DayRow
+                key={fila.matriculaId}
+                fila={fila}
+                idx={i}
+                busy={busy}
+                onSetEstado={() => {}}
+              />
+            ))}
+          </>
+        )}
       </tbody>
       <tfoot className="sticky bottom-0 bg-surface-card border-t-2 border-surface-muted">
         <tr>
           <td colSpan={3} className="px-4 py-2 text-xs text-slate-500">
-            {filas.length} estudiantes · {registrados} con registro hoy
+            {activos.length} activos · {registrados} con registro hoy
+            {retirados.length > 0 && <span className="ml-2 text-slate-400">· {retirados.length} retirados</span>}
           </td>
         </tr>
       </tfoot>
@@ -371,6 +397,45 @@ function DayRow({ fila, idx, busy, onSetEstado }: {
   const pct = fila.totalSesiones > 0
     ? Math.round((fila.asistidas / fila.totalSesiones) * 100)
     : null;
+
+  if (fila.retirado) {
+    return (
+      <tr className="border-b border-slate-100 bg-slate-50/70 opacity-60">
+        <td className="sticky left-0 z-10 bg-slate-50 px-2 py-2 text-xs leading-tight border-r border-slate-200/50">
+          <span className="text-slate-500 italic">
+            <span className="sm:hidden">{nombreCorto(fila.nombreCompleto)}</span>
+            <span className="hidden sm:inline">{fila.nombreCompleto}</span>
+          </span>
+          {fila.retiroObs && (
+            <p className="text-[9px] text-slate-400 mt-0.5 not-italic">{fila.retiroObs}</p>
+          )}
+        </td>
+        <td className="text-center px-2 py-2">
+          <span className="text-[9px] font-bold text-red-500 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md">
+            RETIRADO
+          </span>
+        </td>
+        <td className="text-center px-3 py-2">
+          {fila.totalSesiones === 0 ? (
+            <span className="text-xs text-slate-400">—</span>
+          ) : (
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-[11px] font-bold text-slate-400">
+                {fila.asistidas}/{fila.totalSesiones}
+                {pct !== null && <span className="font-normal"> ({pct}%)</span>}
+              </span>
+              {(fila.fj > 0 || fila.fi > 0) && (
+                <div className="flex gap-1.5 text-[10px] text-slate-400">
+                  {fila.fj > 0 && <span>{fila.fj}FJ</span>}
+                  {fila.fi > 0 && <span>{fila.fi}FI</span>}
+                </div>
+              )}
+            </div>
+          )}
+        </td>
+      </tr>
+    );
+  }
 
   return (
     <tr className={`border-b border-surface-muted/50 ${idx % 2 !== 0 ? 'bg-slate-50' : ''}`}>

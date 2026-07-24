@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { db, getEstudiantesPorGrupo } from '@/db/database';
+import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
 import type { EstadoAsistencia, RegistroAsistencia } from '@/db/types';
 
 // ── Tipos de UI ────────────────────────────────────────────
@@ -14,6 +14,8 @@ export interface FilaAsistencia {
   asistidas:      number;
   fi:             number;
   fj:             number;
+  retirado?:      boolean;
+  retiroObs?:     string;
 }
 
 export interface FilaMes {
@@ -45,7 +47,10 @@ export async function cargarAsistenciaGrupo(
   asignaturaId: string,
   fecha:        string,
 ): Promise<FilaAsistencia[]> {
-  const pares = await getEstudiantesPorGrupo(grupoId, anio);
+  const [paresActivos, paresRetirados] = await Promise.all([
+    getEstudiantesPorGrupo(grupoId, anio),
+    getEstudiantesRetiradosPorGrupo(grupoId, anio),
+  ]);
 
   const todosRegistros = await db.registros_asistencia
     .where('[matricula_id+asignatura_id+fecha]')
@@ -64,26 +69,31 @@ export async function cargarAsistenciaGrupo(
     porMatricula.set(r.matricula_id, arr);
   }
 
-  return pares.map(({ matricula, estudiante }) => {
-    const registros      = porMatricula.get(matricula.id) ?? [];
-    const hoy            = registros.find((r) => r.fecha === fecha);
-    const fechasUnicas   = new Set(registros.map((r) => r.fecha));
-    const totalSesiones  = fechasUnicas.size;
-    const asistidas      = registros.filter((r) => r.estado === 'ASISTE').length;
-    const fi             = registros.filter((r) => r.estado === 'FI').length;
-    const fj             = registros.filter((r) => r.estado === 'FJ').length;
-
+  const buildFila = (
+    { matricula, estudiante }: { matricula: { id: string; retiro_observaciones?: string }; estudiante: Parameters<typeof formatNombre>[0] },
+    retirado: boolean,
+  ): FilaAsistencia => {
+    const registros     = porMatricula.get(matricula.id) ?? [];
+    const hoy           = registros.find((r) => r.fecha === fecha);
+    const fechasUnicas  = new Set(registros.map((r) => r.fecha));
+    const totalSesiones = fechasUnicas.size;
+    const asistidas     = registros.filter((r) => r.estado === 'ASISTE').length;
+    const fi            = registros.filter((r) => r.estado === 'FI').length;
+    const fj            = registros.filter((r) => r.estado === 'FJ').length;
     return {
       matriculaId:    matricula.id,
       nombreCompleto: formatNombre(estudiante),
       estadoHoy:      hoy?.estado ?? null,
       registroIdHoy:  hoy?.id     ?? null,
-      totalSesiones,
-      asistidas,
-      fi,
-      fj,
+      totalSesiones, asistidas, fi, fj,
+      retirado, retiroObs: matricula.retiro_observaciones,
     };
-  });
+  };
+
+  return [
+    ...paresActivos.map(p  => buildFila(p, false)),
+    ...paresRetirados.map(p => buildFila(p, true)),
+  ];
 }
 
 // ── Carga vista mes ────────────────────────────────────────
@@ -305,7 +315,7 @@ export async function tomarListaCompleta(
   const nuevas: FilaAsistencia[] = [];
 
   for (const fila of filas) {
-    if (fila.estadoHoy !== null) {
+    if (fila.retirado || fila.estadoHoy !== null) {
       nuevas.push(fila);
       continue;
     }
