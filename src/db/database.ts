@@ -87,11 +87,17 @@ export async function getEstudiantesRetiradosPorGrupo(grupoId: string, anio: num
     .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
 }
 
+// Notifica a otros módulos (Notas, etc.) que el listado de estudiantes cambió
+function notificarCambioEstudiantes() {
+  window.dispatchEvent(new CustomEvent('mpb:estudiantesCambiados'));
+}
+
 export async function retirarEstudiante(matriculaId: string, observaciones?: string) {
   const now = new Date().toISOString();
   const m = await db.matriculas.get(matriculaId);
   if (!m) throw new Error('Matrícula no encontrada');
   await db.matriculas.put({ ...m, activo: false, retiro_observaciones: observaciones ?? '', updated_at: now });
+  notificarCambioEstudiantes();
 }
 
 export async function reactivarEstudiante(matriculaId: string) {
@@ -99,6 +105,7 @@ export async function reactivarEstudiante(matriculaId: string) {
   const m = await db.matriculas.get(matriculaId);
   if (!m) throw new Error('Matrícula no encontrada');
   await db.matriculas.put({ ...m, activo: true, retiro_observaciones: undefined, updated_at: now });
+  notificarCambioEstudiantes();
 }
 
 export async function moverEstudianteAGrupo(matriculaId: string, nuevoGrupoId: string) {
@@ -106,6 +113,7 @@ export async function moverEstudianteAGrupo(matriculaId: string, nuevoGrupoId: s
   const m = await db.matriculas.get(matriculaId);
   if (!m) throw new Error('Matrícula no encontrada');
   await db.matriculas.put({ ...m, grupo_id: nuevoGrupoId, updated_at: now });
+  notificarCambioEstudiantes();
 }
 
 export async function agregarEstudianteNuevo(
@@ -136,6 +144,7 @@ export async function agregarEstudianteNuevo(
     id: uuidv4(), estudiante_id: estudianteId,
     grupo_id: grupoId, anio, activo: true, created_at: now, updated_at: now,
   });
+  notificarCambioEstudiantes();
 }
 
 export async function getCalificacion(

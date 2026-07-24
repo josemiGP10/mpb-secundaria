@@ -77,6 +77,21 @@ export function CalificacionesView() {
       .finally(() => setLoading(false));
   }, [grupoId, asigId, periodo, anio]);
 
+  // Recarga cuando se retira/mueve/agrega un estudiante desde el módulo de Asistencia
+  useEffect(() => {
+    const recargar = () => {
+      if (!grupoId || !asigId) return;
+      Promise.all([
+        cargarActividades(grupoId, asigId, periodo, anio),
+        cargarFilasGrupo(grupoId, asigId, periodo, anio),
+      ])
+        .then(([acts, fils]) => { setActividades(acts); setFilas(fils); })
+        .catch(console.error);
+    };
+    window.addEventListener('mpb:estudiantesCambiados', recargar);
+    return () => window.removeEventListener('mpb:estudiantesCambiados', recargar);
+  }, [grupoId, asigId, periodo, anio]);
+
   // Limpiar selección al cambiar grupo/asig/periodo
   useEffect(() => { setSelectedIds(new Set()); setTargetMasivo(''); }, [grupoId, asigId, periodo]);
 
