@@ -48,6 +48,30 @@ async function bajarTabla(tabla: string): Promise<unknown[]> {
   return todas;
 }
 
+// Merge last-write-wins por updated_at: solo sobreescribe si el registro remoto
+// es más nuevo que el local. Así un retiro/cambio local no se pisa en la bajada.
+async function mergeConUpdatedAt(
+  tabla: { bulkGet: (ids: string[]) => Promise<(Record<string, unknown> | undefined)[]>; bulkPut: (rows: Record<string, unknown>[]) => Promise<unknown> },
+  remoteRows: Record<string, unknown>[],
+): Promise<void> {
+  if (remoteRows.length === 0) return;
+  const ids = remoteRows.map(r => r.id as string);
+  const locales = await tabla.bulkGet(ids);
+  const aPoner: Record<string, unknown>[] = [];
+  for (let i = 0; i < remoteRows.length; i++) {
+    const remote = remoteRows[i];
+    const local  = locales[i];
+    if (!local) {
+      aPoner.push(remote);
+    } else {
+      const tsLocal  = (local.updated_at  as string) ?? '';
+      const tsRemote = (remote.updated_at as string) ?? '';
+      if (tsRemote >= tsLocal) aPoner.push(remote);
+    }
+  }
+  if (aPoner.length > 0) await tabla.bulkPut(aPoner as never);
+}
+
 export function getUltimaSync(): string | null {
   return localStorage.getItem(SYNC_TS_KEY);
 }
@@ -101,20 +125,22 @@ export async function sincronizarBajada(): Promise<SyncResult> {
   const errores: string[] = [];
   let total = 0;
 
+  // Tablas con updated_at → merge last-write-wins (evita pisar cambios locales más nuevos)
+  // Tablas sin updated_at (solo created_at) → bulkPut directo (son registros de solo inserción)
   const pasos: [string, (r: unknown[]) => Promise<void>][] = [
-    ['areas',                  async (r) => { await db.areas.bulkPut(r as never); }],
-    ['asignaturas',            async (r) => { await db.asignaturas.bulkPut(r as never); }],
-    ['grupos',                 async (r) => { await db.grupos.bulkPut(r as never); }],
-    ['grupo_asignaturas',      async (r) => { await db.grupo_asignaturas.bulkPut(r as never); }],
-    ['estudiantes',            async (r) => { await db.estudiantes.bulkPut(r as never); }],
-    ['matriculas',             async (r) => { await db.matriculas.bulkPut(r as never); }],
-    ['actividades_cognitivas', async (r) => { await db.actividades_cognitivas.bulkPut(r as never); }],
-    ['calificaciones',         async (r) => { await db.calificaciones.bulkPut(r as never); }],
+    ['areas',                  async (r) => { await mergeConUpdatedAt(db.areas         as never, r as never); }],
+    ['asignaturas',            async (r) => { await mergeConUpdatedAt(db.asignaturas   as never, r as never); }],
+    ['grupos',                 async (r) => { await mergeConUpdatedAt(db.grupos        as never, r as never); }],
+    ['grupo_asignaturas',      async (r) => { await mergeConUpdatedAt(db.grupo_asignaturas as never, r as never); }],
+    ['estudiantes',            async (r) => { await mergeConUpdatedAt(db.estudiantes   as never, r as never); }],
+    ['matriculas',             async (r) => { await mergeConUpdatedAt(db.matriculas    as never, r as never); }],
+    ['actividades_cognitivas', async (r) => { await mergeConUpdatedAt(db.actividades_cognitivas as never, r as never); }],
+    ['calificaciones',         async (r) => { await mergeConUpdatedAt(db.calificaciones as never, r as never); }],
     ['notas_cognitivas',       async (r) => { await db.notas_cognitivas.bulkPut(r as never); }],
     ['registros_asistencia',   async (r) => { await db.registros_asistencia.bulkPut(r as never); }],
-    ['secuencias',             async (r) => { await db.secuencias.bulkPut(r as never); }],
-    ['sesiones',               async (r) => { await db.sesiones.bulkPut(r as never); }],
-    ['registros_clase',        async (r) => { await db.registros_clase.bulkPut(r as never); }],
+    ['secuencias',             async (r) => { await mergeConUpdatedAt(db.secuencias   as never, r as never); }],
+    ['sesiones',               async (r) => { await mergeConUpdatedAt(db.sesiones     as never, r as never); }],
+    ['registros_clase',        async (r) => { await mergeConUpdatedAt(db.registros_clase as never, r as never); }],
   ];
 
   for (const [tabla, putter] of pasos) {

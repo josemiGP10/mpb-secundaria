@@ -499,7 +499,7 @@ function GrillaCalificaciones({
           {actividades.map((act) => (
             <th key={act.id} className="text-center px-1 py-1.5 border-b border-r border-surface-muted min-w-[80px] max-w-[110px]">
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-[10px] text-white font-medium truncate max-w-[100px]" title={act.nombre}>
+                <span className="text-[10px] text-slate-700 font-medium truncate max-w-[100px]" title={act.nombre}>
                   {act.nombre}
                 </span>
                 <button

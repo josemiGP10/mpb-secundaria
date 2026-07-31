@@ -32,13 +32,16 @@ function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T
 //  Vista Mes  — grilla editable histórico
 // ============================================================
 
-function fechaLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+// Fecha y año en zona horaria de Colombia (UTC-5) para evitar desfases nocturnos
+function fechaBogota(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 }
-const HOY       = fechaLocal();
-const HOY_MES   = new Date().getMonth() + 1;
-const HOY_ANIO  = new Date().getFullYear();
+function mesBogota(): number {
+  return Number(new Date().toLocaleDateString('en-US', { timeZone: 'America/Bogota', month: 'numeric' }));
+}
+function anioBogota(): number {
+  return Number(new Date().toLocaleDateString('en-US', { timeZone: 'America/Bogota', year: 'numeric' }));
+}
 
 const MESES = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -48,13 +51,13 @@ const MESES = [
 type Vista = 'dia' | 'mes';
 
 export function AsistenciaView() {
-  const anio = HOY_ANIO;
+  const anio = anioBogota();
 
   const [vista,          setVista]          = useState<Vista>('dia');
   const [grupoId,        setGrupoId]        = useState('');
   const [asignaturaId,   setAsignaturaId]   = useState('');
-  const [fecha,          setFecha]          = useState(HOY);
-  const [mes,            setMes]            = useState(HOY_MES);
+  const [fecha,          setFecha]          = useState(fechaBogota);
+  const [mes,            setMes]            = useState(mesBogota);
   const [modalGestionar, setModalGestionar] = useState(false);
 
   const grupos = useLiveQuery(async () => {
