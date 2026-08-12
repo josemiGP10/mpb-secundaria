@@ -751,26 +751,26 @@ function FormRegistroDia({
         placeholder="¿Qué se vio en clase? ¿Dónde quedamos?"
         rows={2}
         autoFocus
-        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-500 resize-none"
+        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:border-blue-500 resize-none"
       />
       <input
         value={pendiente}
         onChange={(e) => setPendiente(e.target.value)}
         placeholder="Pendiente para la próxima clase..."
-        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-500"
+        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:border-blue-500"
       />
       <div className="flex gap-2">
         <input
           value={tareaDesc}
           onChange={(e) => setTareaDesc(e.target.value)}
           placeholder="Tarea asignada..."
-          className="flex-1 min-w-0 border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-500"
+          className="flex-1 min-w-0 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:border-blue-500"
         />
         <input
           type="date"
           value={tareaFecha}
           onChange={(e) => setTareaFecha(e.target.value)}
-          className="w-32 flex-shrink-0 border border-slate-300 rounded-xl px-2 py-2 text-xs bg-white focus:outline-none focus:border-blue-500"
+          className="w-32 flex-shrink-0 border border-slate-300 rounded-xl px-2 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:border-blue-500"
         />
       </div>
       <label className="flex items-center gap-2 cursor-pointer">
