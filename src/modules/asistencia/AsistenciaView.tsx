@@ -9,10 +9,12 @@ import {
   moverEstudianteAGrupo,
   agregarEstudianteNuevo,
 } from '@/db/database';
-import type { EstadoAsistencia, Grupo, Matricula, Estudiante } from '@/db/types';
+import type { EstadoAsistencia, Grupo, Matricula, Estudiante, RegistroClase } from '@/db/types';
 import {
   cargarAsistenciaGrupo,
   cargarAsistenciaMes,
+  cargarRegistroClaseDia,
+  guardarRegistroClaseDia,
   setEstadoDirecto,
   toggleEstadoFecha,
   tomarListaCompleta,
@@ -262,6 +264,11 @@ export function AsistenciaView() {
           <StatChip label="F.I."         value={filasActivas.filter((f) => f.estadoHoy === 'FI').length}     color="red"     />
           <StatChip label="Sin registro" value={sinRegistroHoy}                                              color="slate"   />
         </div>
+      )}
+
+      {/* ── Registro de clase del día (observación / pendiente / tarea) ── */}
+      {vista === 'dia' && grupoId && asignaturaId && (
+        <RegistroClaseDiaPanel grupoId={grupoId} asignaturaId={asignaturaId} fecha={fecha} />
       )}
 
       {/* ── Contenido ── */}
@@ -624,6 +631,173 @@ function CeldaMes({ estado, disabled, onClick }: {
     >
       {CELDA_LABELS[estado]}
     </button>
+  );
+}
+
+// ── RegistroClaseDiaPanel ──────────────────────────────────
+// Observación rápida de la clase (dónde quedó / pendiente / tarea),
+// ligada a grupo+asignatura+fecha. Visible directo desde Asistencia.
+
+function RegistroClaseDiaPanel({
+  grupoId, asignaturaId, fecha,
+}: { grupoId: string; asignaturaId: string; fecha: string }) {
+  const [registro, setRegistro] = useState<RegistroClase | undefined>(undefined);
+  const [loading,  setLoading]  = useState(true);
+  const [editando, setEditando] = useState(false);
+
+  useEffect(() => {
+    setEditando(false);
+    setLoading(true);
+    cargarRegistroClaseDia(grupoId, asignaturaId, fecha)
+      .then(setRegistro)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [grupoId, asignaturaId, fecha]);
+
+  if (loading) return null;
+
+  if (editando) {
+    return (
+      <FormRegistroDia
+        grupoId={grupoId}
+        asignaturaId={asignaturaId}
+        fecha={fecha}
+        registro={registro}
+        onSaved={(r) => { setRegistro(r); setEditando(false); }}
+        onCancel={() => setEditando(false)}
+      />
+    );
+  }
+
+  const tieneContenido = !!registro && !!(registro.nota_breve || registro.pendiente || registro.tarea_desc);
+
+  return (
+    <div className="px-3 py-2 border-b border-surface-muted bg-surface-card flex-shrink-0">
+      {!tieneContenido ? (
+        <button
+          onClick={() => setEditando(true)}
+          className="w-full py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 text-xs transition-colors"
+        >
+          + Observación de la clase (dónde quedó / pendiente / tarea)
+        </button>
+      ) : (
+        <div className="flex items-start gap-2">
+          <div className="flex-1 flex flex-col gap-1 min-w-0">
+            {registro!.nota_breve && (
+              <p className="text-xs text-slate-700">{registro!.nota_breve}</p>
+            )}
+            {registro!.pendiente && (
+              <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded-lg">
+                <span className="font-semibold">Pendiente: </span>{registro!.pendiente}
+              </p>
+            )}
+            {registro!.tarea_desc && (
+              <p className="text-xs text-violet-700 bg-violet-50 px-2 py-1 rounded-lg">
+                <span className="font-semibold">Tarea: </span>{registro!.tarea_desc}
+                {registro!.tarea_fecha && <span className="text-violet-500 ml-1">para {registro!.tarea_fecha}</span>}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setEditando(true)}
+            className="flex-shrink-0 text-[10px] px-2 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100"
+          >
+            Editar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormRegistroDia({
+  grupoId, asignaturaId, fecha, registro, onSaved, onCancel,
+}: {
+  grupoId: string; asignaturaId: string; fecha: string;
+  registro?: RegistroClase;
+  onSaved: (r: RegistroClase) => void;
+  onCancel: () => void;
+}) {
+  const [notaBreve,  setNotaBreve]  = useState(registro?.nota_breve  ?? '');
+  const [pendiente,  setPendiente]  = useState(registro?.pendiente   ?? '');
+  const [tareaDesc,  setTareaDesc]  = useState(registro?.tarea_desc  ?? '');
+  const [tareaFecha, setTareaFecha] = useState(registro?.tarea_fecha ?? '');
+  const [huboAct,    setHuboAct]    = useState(registro?.hubo_actividad ?? false);
+  const [saving,     setSaving]     = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = await guardarRegistroClaseDia(
+        grupoId, asignaturaId, fecha,
+        {
+          nota_breve: notaBreve.trim(), pendiente: pendiente.trim(),
+          tarea_desc: tareaDesc.trim(), tarea_fecha: tareaFecha,
+          hubo_actividad: huboAct,
+        },
+        registro?.id,
+      );
+      onSaved(r);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="px-3 py-2.5 border-b border-surface-muted bg-blue-50 flex-shrink-0 flex flex-col gap-2">
+      <textarea
+        value={notaBreve}
+        onChange={(e) => setNotaBreve(e.target.value)}
+        placeholder="¿Qué se vio en clase? ¿Dónde quedamos?"
+        rows={2}
+        autoFocus
+        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-500 resize-none"
+      />
+      <input
+        value={pendiente}
+        onChange={(e) => setPendiente(e.target.value)}
+        placeholder="Pendiente para la próxima clase..."
+        className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-500"
+      />
+      <div className="flex gap-2">
+        <input
+          value={tareaDesc}
+          onChange={(e) => setTareaDesc(e.target.value)}
+          placeholder="Tarea asignada..."
+          className="flex-1 min-w-0 border border-slate-300 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-blue-500"
+        />
+        <input
+          type="date"
+          value={tareaFecha}
+          onChange={(e) => setTareaFecha(e.target.value)}
+          className="w-32 flex-shrink-0 border border-slate-300 rounded-xl px-2 py-2 text-xs bg-white focus:outline-none focus:border-blue-500"
+        />
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={huboAct}
+          onChange={(e) => setHuboAct(e.target.checked)}
+          className="w-3.5 h-3.5 rounded"
+        />
+        <span className="text-xs text-slate-700">Hubo actividad / evaluación en clase</span>
+      </label>
+      <div className="flex gap-2">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex-1 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-500 disabled:opacity-40 active:scale-95 transition-all"
+        >
+          {saving ? '...' : 'Guardar'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-4 py-1.5 bg-white border border-slate-300 text-slate-600 text-xs rounded-lg hover:bg-slate-50 transition-colors"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
   );
 }
 

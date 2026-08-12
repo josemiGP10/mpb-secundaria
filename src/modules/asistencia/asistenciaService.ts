@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
-import type { EstadoAsistencia, RegistroAsistencia } from '@/db/types';
+import type { EstadoAsistencia, RegistroAsistencia, RegistroClase } from '@/db/types';
 
 // ── Tipos de UI ────────────────────────────────────────────
 
@@ -359,6 +359,59 @@ export async function tomarListaCompleta(
   }
 
   return nuevas;
+}
+
+// ── Registro de clase del día (observación / pendiente / tarea) ──
+// Ligado directo a grupo+asignatura+fecha, sin depender de Secuencias.
+
+export async function cargarRegistroClaseDia(
+  grupoId:      string,
+  asignaturaId: string,
+  fecha:        string,
+): Promise<RegistroClase | undefined> {
+  return db.registros_clase
+    .where('grupo_id').equals(grupoId)
+    .filter((r) => r.asignatura_id === asignaturaId && r.fecha === fecha)
+    .first();
+}
+
+export async function guardarRegistroClaseDia(
+  grupoId:      string,
+  asignaturaId: string,
+  fecha:        string,
+  campos: {
+    nota_breve:     string;
+    pendiente:      string;
+    tarea_desc:     string;
+    tarea_fecha:    string;
+    hubo_actividad: boolean;
+  },
+  existenteId?: string,
+): Promise<RegistroClase> {
+  const now = new Date().toISOString();
+
+  if (existenteId) {
+    const existente = await db.registros_clase.get(existenteId);
+    if (existente) {
+      const actualizado: RegistroClase = { ...existente, ...campos, updated_at: now };
+      await db.registros_clase.put(actualizado);
+      return actualizado;
+    }
+  }
+
+  const nuevo: RegistroClase = {
+    id: uuidv4(),
+    sesion_id:    null,
+    grupo_id:     grupoId,
+    asignatura_id: asignaturaId,
+    fecha,
+    momento: 'COMPLETA',
+    ...campos,
+    created_at: now,
+    updated_at: now,
+  };
+  await db.registros_clase.add(nuevo);
+  return nuevo;
 }
 
 // ── Helper ─────────────────────────────────────────────────

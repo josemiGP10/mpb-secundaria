@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { db, getCalificacion, getEstudiantesPorGrupo } from '@/db/database';
+import { db, getCalificacion, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
 import { calcularNota, buildGradeInput } from './gradeEngine';
 import type { ActividadCognitiva, Calificacion, TipoAsignatura } from '@/db/types';
 
@@ -106,7 +106,19 @@ export async function cargarFilasGrupo(
   periodo: number,
   anio: number,
 ): Promise<FilaEstudiante[]> {
-  const pares = await getEstudiantesPorGrupo(grupoId, anio);
+  const [paresActivos, paresRetirados] = await Promise.all([
+    getEstudiantesPorGrupo(grupoId, anio),
+    getEstudiantesRetiradosPorGrupo(grupoId, anio),
+  ]);
+  // Si hay matrículas duplicadas (siembra multi-dispositivo), un mismo estudiante
+  // puede aparecer como activo Y retirado. La versión retirada tiene precedencia
+  // (mismo criterio que en el módulo de Asistencia).
+  const retiradosKeys = new Set(
+    paresRetirados.map(p => `${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
+  );
+  const pares = paresActivos.filter(
+    p => !retiradosKeys.has(`${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
+  );
   const filas: FilaEstudiante[] = [];
 
   for (const { matricula, estudiante } of pares) {
