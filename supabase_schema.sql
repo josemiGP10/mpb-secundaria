@@ -3,6 +3,9 @@
 --  Pegar en: Supabase → SQL Editor → New Query → Run
 -- ============================================================
 
+-- MIGRACIÓN (si la base ya existe, ejecutar solo esta línea):
+-- alter table matriculas add column if not exists retiro_observaciones text;
+
 -- Catálogo
 
 create table if not exists areas (
@@ -56,13 +59,14 @@ create table if not exists estudiantes (
 );
 
 create table if not exists matriculas (
-  id             text primary key,
-  estudiante_id  text not null references estudiantes(id),
-  grupo_id       text not null references grupos(id),
-  anio           integer not null,
-  activo         boolean not null default true,
-  created_at     text not null,
-  updated_at     text not null
+  id                    text primary key,
+  estudiante_id         text not null references estudiantes(id),
+  grupo_id              text not null references grupos(id),
+  anio                  integer not null,
+  activo                boolean not null default true,
+  retiro_observaciones  text,
+  created_at            text not null,
+  updated_at            text not null
 );
 
 -- Calificaciones
