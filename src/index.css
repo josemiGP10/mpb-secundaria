@@ -9,6 +9,13 @@
   html {
     font-family: 'Inter', system-ui, sans-serif;
   }
+  /* Todos los campos de la app son claros (bg-white + text-slate-900).
+     Sin esto, el navegador aplica su render nativo oscuro (heredado del
+     class="dark" del <html>) a inputs/textareas y el texto tipeado queda
+     invisible hasta que el campo pierde el foco y repinta. */
+  input, textarea, select {
+    color-scheme: light;
+  }
   /* Scrollbar delgada para tablets */
   ::-webkit-scrollbar {
     width: 4px;
