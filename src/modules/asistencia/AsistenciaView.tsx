@@ -14,6 +14,7 @@ import {
   cargarAsistenciaGrupo,
   cargarAsistenciaMes,
   cargarRegistroClaseDia,
+  cargarUltimaObservacionAnterior,
   guardarRegistroClaseDia,
   setEstadoDirecto,
   toggleEstadoFecha,
@@ -638,18 +639,27 @@ function CeldaMes({ estado, disabled, onClick }: {
 // Observación rápida de la clase (dónde quedó / pendiente / tarea),
 // ligada a grupo+asignatura+fecha. Visible directo desde Asistencia.
 
+function fmtFechaCorta(f: string): string {
+  const d = new Date(f + 'T00:00:00');
+  return `${d.getDate()}/${d.getMonth() + 1}`;
+}
+
 function RegistroClaseDiaPanel({
   grupoId, asignaturaId, fecha,
 }: { grupoId: string; asignaturaId: string; fecha: string }) {
   const [registro, setRegistro] = useState<RegistroClase | undefined>(undefined);
+  const [anterior,  setAnterior] = useState<RegistroClase | undefined>(undefined);
   const [loading,  setLoading]  = useState(true);
   const [editando, setEditando] = useState(false);
 
   useEffect(() => {
     setEditando(false);
     setLoading(true);
-    cargarRegistroClaseDia(grupoId, asignaturaId, fecha)
-      .then(setRegistro)
+    Promise.all([
+      cargarRegistroClaseDia(grupoId, asignaturaId, fecha),
+      cargarUltimaObservacionAnterior(grupoId, asignaturaId, fecha),
+    ])
+      .then(([r, ant]) => { setRegistro(r); setAnterior(ant); })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [grupoId, asignaturaId, fecha]);
@@ -674,12 +684,35 @@ function RegistroClaseDiaPanel({
   return (
     <div className="px-3 py-2 border-b border-surface-muted bg-surface-card flex-shrink-0">
       {!tieneContenido ? (
-        <button
-          onClick={() => setEditando(true)}
-          className="w-full py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 text-xs transition-colors"
-        >
-          + Observación de la clase (dónde quedó / pendiente / tarea)
-        </button>
+        <div className="flex flex-col gap-1.5">
+          {anterior && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 flex flex-col gap-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Última clase · {fmtFechaCorta(anterior.fecha)}
+              </p>
+              {anterior.nota_breve && (
+                <p className="text-xs text-slate-600">{anterior.nota_breve}</p>
+              )}
+              {anterior.pendiente && (
+                <p className="text-xs text-amber-700">
+                  <span className="font-semibold">Pendiente: </span>{anterior.pendiente}
+                </p>
+              )}
+              {anterior.tarea_desc && (
+                <p className="text-xs text-violet-700">
+                  <span className="font-semibold">Tarea: </span>{anterior.tarea_desc}
+                  {anterior.tarea_fecha && <span className="text-violet-500 ml-1">para {anterior.tarea_fecha}</span>}
+                </p>
+              )}
+            </div>
+          )}
+          <button
+            onClick={() => setEditando(true)}
+            className="w-full py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600 text-xs transition-colors"
+          >
+            + Observación de la clase (dónde quedó / pendiente / tarea)
+          </button>
+        </div>
       ) : (
         <div className="flex items-start gap-2">
           <div className="flex-1 flex flex-col gap-1 min-w-0">

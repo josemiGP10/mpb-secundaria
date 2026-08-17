@@ -375,6 +375,24 @@ export async function cargarRegistroClaseDia(
     .first();
 }
 
+export async function cargarUltimaObservacionAnterior(
+  grupoId:      string,
+  asignaturaId: string,
+  fechaActual:  string,
+): Promise<RegistroClase | undefined> {
+  const anteriores = await db.registros_clase
+    .where('grupo_id').equals(grupoId)
+    .filter((r) =>
+      r.asignatura_id === asignaturaId &&
+      r.fecha < fechaActual &&
+      !!(r.nota_breve || r.pendiente || r.tarea_desc),
+    )
+    .toArray();
+  if (anteriores.length === 0) return undefined;
+  anteriores.sort((a, b) => b.fecha.localeCompare(a.fecha));
+  return anteriores[0];
+}
+
 export async function guardarRegistroClaseDia(
   grupoId:      string,
   asignaturaId: string,
