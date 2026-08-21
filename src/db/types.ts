@@ -2,7 +2,7 @@
 //  TIPOS — Diario Pedagógico MPB Secundaria
 // ============================================================
 
-export type EstadoAsistencia = 'ASISTE' | 'FJ' | 'FI';
+export type EstadoAsistencia = 'ASISTE' | 'FJ' | 'FI' | 'A';
 export type TipoAsignatura   = 'BASICA' | 'COMPLEMENTARIA';
 export type EstadoSecuencia  = 'BORRADOR' | 'ACTIVA' | 'COMPLETADA';
 export type MomentoClase     = 'INICIO' | 'DESARROLLO' | 'CIERRE' | 'COMPLETA';

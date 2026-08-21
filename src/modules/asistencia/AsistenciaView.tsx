@@ -263,7 +263,8 @@ export function AsistenciaView() {
           <StatChip label="Asisten"      value={filasActivas.filter((f) => f.estadoHoy === 'ASISTE').length} color="emerald" />
           <StatChip label="F.J."         value={filasActivas.filter((f) => f.estadoHoy === 'FJ').length}     color="yellow"  />
           <StatChip label="F.I."         value={filasActivas.filter((f) => f.estadoHoy === 'FI').length}     color="red"     />
-          <StatChip label="Sin registro" value={sinRegistroHoy}                                              color="slate"   />
+          <StatChip label="Ab."          value={filasActivas.filter((f) => f.estadoHoy === 'A').length}      color="orange"  />
+          <StatChip label="Sin reg."     value={sinRegistroHoy}                                              color="slate"   />
         </div>
       )}
 
@@ -435,10 +436,11 @@ function DayRow({ fila, idx, busy, onSetEstado }: {
                 {fila.asistidas}/{fila.totalSesiones}
                 {pct !== null && <span className="font-normal"> ({pct}%)</span>}
               </span>
-              {(fila.fj > 0 || fila.fi > 0) && (
+              {(fila.fj > 0 || fila.fi > 0 || fila.a > 0) && (
                 <div className="flex gap-1.5 text-[10px] text-slate-400">
                   {fila.fj > 0 && <span>{fila.fj}FJ</span>}
                   {fila.fi > 0 && <span>{fila.fi}FI</span>}
+                  {fila.a  > 0 && <span>{fila.a}Ab</span>}
                 </div>
               )}
             </div>
@@ -466,10 +468,11 @@ function DayRow({ fila, idx, busy, onSetEstado }: {
               {fila.asistidas}/{fila.totalSesiones}
               {pct !== null && <span className="font-normal text-slate-500"> ({pct}%)</span>}
             </span>
-            {(fila.fj > 0 || fila.fi > 0) && (
+            {(fila.fj > 0 || fila.fi > 0 || fila.a > 0) && (
               <div className="flex gap-1.5 text-[10px]">
                 {fila.fj > 0 && <span className="text-yellow-600">{fila.fj}FJ</span>}
                 {fila.fi > 0 && <span className="text-red-600">{fila.fi}FI</span>}
+                {fila.a  > 0 && <span className="text-orange-600">{fila.a}Ab</span>}
               </div>
             )}
           </div>
@@ -517,6 +520,7 @@ function MesGrid({ grilla, busy, onToggle }: {
             const asistidas = vals.filter((e) => e === 'ASISTE').length;
             const fj        = vals.filter((e) => e === 'FJ').length;
             const fi        = vals.filter((e) => e === 'FI').length;
+            const ab        = vals.filter((e) => e === 'A').length;
             const total     = fila.estados.size;
             const pct       = total > 0 ? Math.round((asistidas / total) * 100) : null;
             const bgBase    = i % 2 !== 0 ? 'bg-slate-50' : 'bg-white';
@@ -547,10 +551,11 @@ function MesGrid({ grilla, busy, onToggle }: {
                       <span className={`font-bold ${pct !== null && pct < 75 ? 'text-red-600' : 'text-emerald-600'}`}>
                         {asistidas}/{total}
                       </span>
-                      {(fj > 0 || fi > 0) && (
+                      {(fj > 0 || fi > 0 || ab > 0) && (
                         <div className="flex gap-1">
                           {fj > 0 && <span className="text-yellow-600">{fj}FJ</span>}
                           {fi > 0 && <span className="text-red-600">{fi}FI</span>}
+                          {ab > 0 && <span className="text-orange-600">{ab}Ab</span>}
                         </div>
                       )}
                     </div>
@@ -594,6 +599,7 @@ function EstadoBtns({ estado, disabled, onChange }: {
       {btn('ASISTE', '✓',  'bg-emerald-100 text-emerald-700 border-emerald-400')}
       {btn('FJ',     'FJ', 'bg-yellow-100 text-yellow-700 border-yellow-400')}
       {btn('FI',     '×',  'bg-red-100 text-red-700 border-red-400')}
+      {btn('A',      'A',  'bg-orange-100 text-orange-700 border-orange-400')}
     </div>
   );
 }
@@ -602,11 +608,12 @@ function EstadoBtns({ estado, disabled, onChange }: {
 
 const CELDA_STYLES: Record<EstadoAsistencia, string> = {
   ASISTE: 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200',
-  FJ:     'bg-yellow-100 border-yellow-300 text-yellow-700 hover:bg-yellow-200',
-  FI:     'bg-red-100    border-red-300    text-red-700    hover:bg-red-200',
+  FJ:     'bg-yellow-100  border-yellow-300  text-yellow-700  hover:bg-yellow-200',
+  FI:     'bg-red-100     border-red-300     text-red-700     hover:bg-red-200',
+  A:      'bg-orange-100  border-orange-300  text-orange-700  hover:bg-orange-200',
 };
 const CELDA_LABELS: Record<EstadoAsistencia, string> = {
-  ASISTE: '✓', FJ: 'FJ', FI: 'FI',
+  ASISTE: '✓', FJ: 'FJ', FI: 'FI', A: 'A',
 };
 
 function CeldaMes({ estado, disabled, onClick }: {
@@ -1158,9 +1165,9 @@ function VistaBtn({ active, onClick, children }: {
 }
 
 function StatChip({ label, value, color }: {
-  label: string; value: number; color: 'slate' | 'emerald' | 'yellow' | 'red';
+  label: string; value: number; color: 'slate' | 'emerald' | 'yellow' | 'red' | 'orange';
 }) {
-  const colors = { slate: 'text-slate-600', emerald: 'text-emerald-600', yellow: 'text-yellow-600', red: 'text-red-600' };
+  const colors = { slate: 'text-slate-600', emerald: 'text-emerald-600', yellow: 'text-yellow-600', red: 'text-red-600', orange: 'text-orange-600' };
   return (
     <div className="flex items-center gap-1 text-xs">
       <span className="text-slate-500">{label}:</span>

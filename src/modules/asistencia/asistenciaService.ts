@@ -14,6 +14,7 @@ export interface FilaAsistencia {
   asistidas:      number;
   fi:             number;
   fj:             number;
+  a:              number;
   retirado?:      boolean;
   retiroObs?:     string;
 }
@@ -26,12 +27,13 @@ export interface FilaMes {
 }
 
 // ── Ciclo de estados ───────────────────────────────────────
-// null → ASISTE → FJ → FI → null (último tap borra el registro)
+// null → ASISTE → FJ → FI → A → null (último tap borra el registro)
 
 const CICLO: Record<EstadoAsistencia, EstadoAsistencia | null> = {
   ASISTE: 'FJ',
   FJ:     'FI',
-  FI:     null,
+  FI:     'A',
+  A:      null,
 };
 
 export function ciclarEstado(actual: EstadoAsistencia | null): EstadoAsistencia | null {
@@ -89,12 +91,13 @@ export async function cargarAsistenciaGrupo(
     const asistidas     = registros.filter((r) => r.estado === 'ASISTE').length;
     const fi            = registros.filter((r) => r.estado === 'FI').length;
     const fj            = registros.filter((r) => r.estado === 'FJ').length;
+    const a             = registros.filter((r) => r.estado === 'A').length;
     return {
       matriculaId:    matricula.id,
       nombreCompleto: formatNombre(estudiante),
       estadoHoy:      hoy?.estado ?? null,
       registroIdHoy:  hoy?.id     ?? null,
-      totalSesiones, asistidas, fi, fj,
+      totalSesiones, asistidas, fi, fj, a,
       retirado, retiroObs: matricula.retiro_observaciones,
     };
   };
@@ -163,7 +166,7 @@ export async function toggleEstadoHoy(
   fila:         FilaAsistencia,
   asignaturaId: string,
   fecha:        string,
-): Promise<Pick<FilaAsistencia, 'estadoHoy' | 'registroIdHoy' | 'totalSesiones' | 'asistidas' | 'fi' | 'fj'>> {
+): Promise<Pick<FilaAsistencia, 'estadoHoy' | 'registroIdHoy' | 'totalSesiones' | 'asistidas' | 'fi' | 'fj' | 'a'>> {
   const siguiente = ciclarEstado(fila.estadoHoy);
   const now       = new Date().toISOString();
 
@@ -179,6 +182,7 @@ export async function toggleEstadoHoy(
       asistidas:     fila.asistidas - (fila.estadoHoy === 'ASISTE' ? 1 : 0),
       fi:            fila.fi        - (fila.estadoHoy === 'FI'     ? 1 : 0),
       fj:            fila.fj        - (fila.estadoHoy === 'FJ'     ? 1 : 0),
+      a:             fila.a         - (fila.estadoHoy === 'A'      ? 1 : 0),
     };
   }
 
@@ -208,6 +212,7 @@ export async function toggleEstadoHoy(
     asistidas: (siguiente === 'ASISTE' ? 1 : 0) - (fila.estadoHoy === 'ASISTE' ? 1 : 0),
     fi:        (siguiente === 'FI'     ? 1 : 0) - (fila.estadoHoy === 'FI'     ? 1 : 0),
     fj:        (siguiente === 'FJ'     ? 1 : 0) - (fila.estadoHoy === 'FJ'     ? 1 : 0),
+    a:         (siguiente === 'A'      ? 1 : 0) - (fila.estadoHoy === 'A'      ? 1 : 0),
   };
 
   return {
@@ -217,6 +222,7 @@ export async function toggleEstadoHoy(
     asistidas:     fila.asistidas + delta.asistidas,
     fi:            fila.fi        + delta.fi,
     fj:            fila.fj        + delta.fj,
+    a:             fila.a         + delta.a,
   };
 }
 
@@ -228,7 +234,7 @@ export async function setEstadoDirecto(
   asignaturaId: string,
   fecha:        string,
   estado:       EstadoAsistencia,
-): Promise<Pick<FilaAsistencia, 'estadoHoy' | 'registroIdHoy' | 'totalSesiones' | 'asistidas' | 'fi' | 'fj'>> {
+): Promise<Pick<FilaAsistencia, 'estadoHoy' | 'registroIdHoy' | 'totalSesiones' | 'asistidas' | 'fi' | 'fj' | 'a'>> {
   const now = new Date().toISOString();
   const siguiente: EstadoAsistencia | null = fila.estadoHoy === estado ? null : estado;
 
@@ -243,6 +249,7 @@ export async function setEstadoDirecto(
       asistidas:     fila.asistidas - (fila.estadoHoy === 'ASISTE' ? 1 : 0),
       fi:            fila.fi        - (fila.estadoHoy === 'FI'     ? 1 : 0),
       fj:            fila.fj        - (fila.estadoHoy === 'FJ'     ? 1 : 0),
+      a:             fila.a         - (fila.estadoHoy === 'A'      ? 1 : 0),
     };
   }
 
@@ -271,6 +278,7 @@ export async function setEstadoDirecto(
     asistidas: (siguiente === 'ASISTE' ? 1 : 0) - (fila.estadoHoy === 'ASISTE' ? 1 : 0),
     fi:        (siguiente === 'FI'     ? 1 : 0) - (fila.estadoHoy === 'FI'     ? 1 : 0),
     fj:        (siguiente === 'FJ'     ? 1 : 0) - (fila.estadoHoy === 'FJ'     ? 1 : 0),
+    a:         (siguiente === 'A'      ? 1 : 0) - (fila.estadoHoy === 'A'      ? 1 : 0),
   };
 
   return {
@@ -280,6 +288,7 @@ export async function setEstadoDirecto(
     asistidas:     fila.asistidas + delta.asistidas,
     fi:            fila.fi        + delta.fi,
     fj:            fila.fj        + delta.fj,
+    a:             fila.a         + delta.a,
   };
 }
 
