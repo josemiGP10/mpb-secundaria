@@ -603,9 +603,11 @@ function FilaRow({
   const rowBg = modoMasivo && selected
     ? 'bg-amber-50'
     : index % 2 === 0 ? '' : 'bg-slate-50';
+  const hoverTr = modoMasivo && selected ? '' : 'hover:bg-blue-50';
+  const hoverTd = modoMasivo && selected ? '' : 'group-hover:bg-blue-50';
 
   return (
-    <tr className={`border-b border-surface-muted/40 transition-colors ${rowBg}`}>
+    <tr className={`group border-b border-surface-muted/40 transition-colors ${rowBg} ${hoverTr}`}>
       {/* Checkbox masivo */}
       {modoMasivo && (
         <td className="px-2 text-center border-r border-surface-muted/30">
@@ -623,7 +625,7 @@ function FilaRow({
       )}
 
       {/* Nombre — sticky en móvil */}
-      <td className={`sticky left-0 z-10 px-2 py-2 text-xs text-slate-900 leading-snug border-r border-surface-muted/30 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+      <td className={`sticky left-0 z-10 px-2 py-2 text-xs text-slate-900 leading-snug border-r border-surface-muted/30 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'} ${hoverTd}`}>
         <span className="text-slate-400 mr-1 tabular-nums text-[10px]">{index + 1}.</span>
         {/* Móvil: solo apellido + inicial del nombre. Escritorio: nombre completo */}
         <span className="sm:hidden font-medium">{nombreCorto(fila.nombreCompleto)}</span>

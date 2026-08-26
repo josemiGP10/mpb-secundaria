@@ -451,8 +451,8 @@ function DayRow({ fila, idx, busy, onSetEstado }: {
   }
 
   return (
-    <tr className={`border-b border-surface-muted/50 ${idx % 2 !== 0 ? 'bg-slate-50' : ''}`}>
-      <td className={`sticky left-0 z-10 px-2 py-2.5 text-xs leading-tight border-r border-surface-muted/20 ${idx % 2 !== 0 ? 'bg-slate-50' : 'bg-white'}`}>
+    <tr className={`group border-b border-surface-muted/50 hover:bg-blue-50 transition-colors ${idx % 2 !== 0 ? 'bg-slate-50' : ''}`}>
+      <td className={`sticky left-0 z-10 px-2 py-2.5 text-xs leading-tight border-r border-surface-muted/20 group-hover:bg-blue-50 ${idx % 2 !== 0 ? 'bg-slate-50' : 'bg-white'}`}>
         <span className="sm:hidden text-slate-900">{nombreCorto(fila.nombreCompleto)}</span>
         <span className="hidden sm:inline text-slate-900">{fila.nombreCompleto}</span>
       </td>
@@ -526,8 +526,8 @@ function MesGrid({ grilla, busy, onToggle }: {
             const bgBase    = i % 2 !== 0 ? 'bg-slate-50' : 'bg-white';
 
             return (
-              <tr key={fila.matriculaId} className={`border-b border-surface-muted/50 ${i % 2 !== 0 ? 'bg-slate-50' : ''}`}>
-                <td className={`sticky left-0 z-10 ${bgBase} px-2 py-2 text-xs border-r border-surface-muted/30 min-w-[90px] sm:min-w-[160px]`}>
+              <tr key={fila.matriculaId} className={`group border-b border-surface-muted/50 hover:bg-blue-50 transition-colors ${i % 2 !== 0 ? 'bg-slate-50' : ''}`}>
+                <td className={`sticky left-0 z-10 ${bgBase} group-hover:bg-blue-50 px-2 py-2 text-xs border-r border-surface-muted/30 min-w-[90px] sm:min-w-[160px]`}>
                   <span className="sm:hidden text-slate-900">{nombreCorto(fila.nombreCompleto)}</span>
                   <span className="hidden sm:inline text-slate-900 truncate block max-w-[155px]">{fila.nombreCompleto}</span>
                 </td>
