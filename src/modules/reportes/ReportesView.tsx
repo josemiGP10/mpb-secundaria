@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
 import { cargarActividades, cargarFilasGrupo } from '../calificaciones/calificacionesService';
+import { generarDistribucionSalones, type Salones } from './salonesService';
 import type { Area, Asignatura, Grupo } from '@/db/types';
 
 function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T[] {
@@ -10,7 +11,7 @@ function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T
   );
 }
 
-type TipoReporte = 'notas' | 'asistencia';
+type TipoReporte = 'notas' | 'asistencia' | 'salones';
 
 // ── CSS del reporte imprimible ──────────────────────────────
 const PRINT_CSS = `
@@ -33,6 +34,8 @@ td, th { border: 0.5px solid #aaa; padding: 3px 5px; vertical-align: middle; }
 .rojo  { color: #991b1b; }
 .footer { margin-top: 14px; font-size: 9px; color: #888; display: flex; justify-content: space-between; }
 .firma { margin-top: 36px; border-top: 0.5px solid #aaa; width: 180px; text-align: center; padding-top: 4px; font-size: 9px; color: #555; }
+.salon-page { page-break-after: always; }
+.firma-cell { width: 100px; }
 @media print {
   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
@@ -228,6 +231,39 @@ async function imprimirAsistencia(
   abrirVentana(`Asistencia ${grupoNombre} ${asigNombre}`, cuerpo);
 }
 
+function imprimirSalones(salones: Salones, tituloExamen: string, anio: number): void {
+  const bloques = salones.map((estudiantes, idx) => {
+    const filas = estudiantes.map((e, i) => `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td class="nombre">${e.nombreCompleto}</td>
+        <td class="c">${e.grupoNombre}</td>
+        <td class="c firma-cell"></td>
+      </tr>`).join('');
+
+    return `
+      <div class="salon-page">
+        ${reportEncabezado(tituloExamen, `Salón ${idx + 1} de ${salones.length}`, `Año ${anio}`)}
+        <table>
+          <thead><tr>
+            <th class="num">Nº</th>
+            <th class="nombre">Estudiante</th>
+            <th class="c">Grado</th>
+            <th class="c">Firma</th>
+          </tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+        <div class="footer">
+          <span>Total: ${estudiantes.length} estudiantes</span>
+          <span>Salón ${idx + 1} de ${salones.length}</span>
+        </div>
+        <div class="firma">Docente encargado(a)</div>
+      </div>`;
+  }).join('');
+
+  abrirVentana(`Distribución ${tituloExamen}`, bloques);
+}
+
 // ── Componente principal ────────────────────────────────────
 
 export function ReportesView() {
@@ -238,6 +274,12 @@ export function ReportesView() {
   const [periodo,   setPeriodo]   = useState(1);
   const [tipo,      setTipo]      = useState<TipoReporte>('notas');
   const [generando, setGenerando] = useState(false);
+
+  // ── Distribución de salones (Prueba Institucional) ────────
+  const [numSalones,       setNumSalones]       = useState(15);
+  const [tituloExamen,     setTituloExamen]      = useState('Prueba Institucional');
+  const [salonesPreview,   setSalonesPreview]    = useState<Salones | null>(null);
+  const [generandoSalones, setGenerandoSalones]  = useState(false);
 
   const grupos     = useLiveQuery<Grupo[]>(     () => db.grupos.where('anio').equals(anio).toArray(), [anio]);
   const todasAsigs = useLiveQuery<Asignatura[]>(() => db.asignaturas.toArray(), []);
@@ -283,45 +325,84 @@ export function ReportesView() {
     }
   };
 
+  const handleGenerarSalones = async () => {
+    if (generandoSalones || numSalones < 1) return;
+    setGenerandoSalones(true);
+    try {
+      setSalonesPreview(await generarDistribucionSalones(anio, numSalones));
+    } catch (e) {
+      console.error(e);
+      alert('Error generando la distribución. Intente de nuevo.');
+    } finally {
+      setGenerandoSalones(false);
+    }
+  };
+
+  const handleImprimirSalones = () => {
+    if (!salonesPreview) return;
+    imprimirSalones(salonesPreview, tituloExamen.trim() || 'Prueba Institucional', anio);
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Selectores */}
       <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-surface-muted bg-surface-card flex-shrink-0">
-        <div className="flex gap-1.5">
-          <select
-            value={grupoId}
-            onChange={e => { setGrupoId(e.target.value); setAsigId(''); setPeriodo(1); }}
-            className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
-          >
-            <option value="">— Grupo —</option>
-            {sortGrupos(grupos ?? []).map(g => (
-              <option key={g.id} value={g.id}>{g.nombre}</option>
-            ))}
-          </select>
-          <select
-            value={asigId}
-            onChange={e => setAsigId(e.target.value)}
-            disabled={!grupoId}
-            className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500 disabled:opacity-40"
-          >
-            <option value="">— Asignatura —</option>
-            {asignaturasGrupo.map(a => (
-              <option key={a.id} value={a.id}>{a.nombre}</option>
-            ))}
-          </select>
-        </div>
+        {tipo !== 'salones' ? (
+          <div className="flex gap-1.5">
+            <select
+              value={grupoId}
+              onChange={e => { setGrupoId(e.target.value); setAsigId(''); setPeriodo(1); }}
+              className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
+            >
+              <option value="">— Grupo —</option>
+              {sortGrupos(grupos ?? []).map(g => (
+                <option key={g.id} value={g.id}>{g.nombre}</option>
+              ))}
+            </select>
+            <select
+              value={asigId}
+              onChange={e => setAsigId(e.target.value)}
+              disabled={!grupoId}
+              className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+            >
+              <option value="">— Asignatura —</option>
+              {asignaturasGrupo.map(a => (
+                <option key={a.id} value={a.id}>{a.nombre}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={tituloExamen}
+              onChange={e => { setTituloExamen(e.target.value); setSalonesPreview(null); }}
+              placeholder="Título del examen"
+              className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
+            />
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={numSalones}
+              onChange={e => { setNumSalones(Math.max(1, Number(e.target.value) || 1)); setSalonesPreview(null); }}
+              title="Número de salones"
+              className="w-16 bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        )}
 
         {/* Tipo + período */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {(['notas', 'asistencia'] as TipoReporte[]).map(t => (
+            {(['notas', 'asistencia', 'salones'] as TipoReporte[]).map(t => (
               <button
                 key={t}
                 onClick={() => setTipo(t)}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors
                   ${tipo === t ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
               >
-                {t === 'notas' ? '✎ Notas' : '✓ Asistencia'}
+                {t === 'notas' ? '✎ Notas' : t === 'asistencia' ? '✓ Asistencia' : '🎲 Salones'}
               </button>
             ))}
           </div>
@@ -345,62 +426,120 @@ export function ReportesView() {
       </div>
 
       {/* Cuerpo */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center">
-        <div className="text-5xl select-none">🖨</div>
+      {tipo !== 'salones' ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center">
+          <div className="text-5xl select-none">🖨</div>
 
-        <div>
-          <h2 className="text-base font-semibold text-slate-800 mb-1">
-            {tipo === 'notas' ? 'Boletín de Notas' : 'Reporte de Asistencia'}
-          </h2>
-          <p className="text-sm text-slate-500 max-w-xs">
-            {tipo === 'notas'
-              ? 'Abre una ventana con la tabla de calificaciones lista para imprimir o guardar como PDF.'
-              : 'Abre una ventana con el resumen de asistencia por estudiante listo para imprimir.'}
+          <div>
+            <h2 className="text-base font-semibold text-slate-800 mb-1">
+              {tipo === 'notas' ? 'Boletín de Notas' : 'Reporte de Asistencia'}
+            </h2>
+            <p className="text-sm text-slate-500 max-w-xs">
+              {tipo === 'notas'
+                ? 'Abre una ventana con la tabla de calificaciones lista para imprimir o guardar como PDF.'
+                : 'Abre una ventana con el resumen de asistencia por estudiante listo para imprimir.'}
+            </p>
+          </div>
+
+          {canPrint && (
+            <div className="rounded-xl bg-slate-50 border border-slate-200 px-5 py-3 text-left text-sm text-slate-700 space-y-1 w-full max-w-xs">
+              <p>
+                <span className="text-slate-400 text-xs block">Grupo</span>
+                <strong>{grupoSelec?.nombre}</strong>
+              </p>
+              <p>
+                <span className="text-slate-400 text-xs block">Asignatura</span>
+                <strong>{asigSelec?.nombre}</strong>
+              </p>
+              {tipo === 'notas' && (
+                <p>
+                  <span className="text-slate-400 text-xs block">{labelPer}</span>
+                  <strong>{periodo}</strong>
+                </p>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleImprimir}
+            disabled={!canPrint || generando}
+            className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-blue-600 text-white font-semibold text-sm shadow hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {generando ? (
+              <>
+                <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                Generando...
+              </>
+            ) : (
+              <><span>🖨</span> Imprimir / Guardar PDF</>
+            )}
+          </button>
+
+          {!canPrint && (
+            <p className="text-xs text-slate-400">Seleccione grupo y asignatura para continuar</p>
+          )}
+
+          <p className="text-[10px] text-slate-300 max-w-xs">
+            Se abrirá una nueva ventana. En el diálogo de impresión puede elegir "Guardar como PDF" para exportar el archivo.
           </p>
         </div>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center overflow-y-auto">
+          <div className="text-5xl select-none">🎲</div>
 
-        {canPrint && (
-          <div className="rounded-xl bg-slate-50 border border-slate-200 px-5 py-3 text-left text-sm text-slate-700 space-y-1 w-full max-w-xs">
-            <p>
-              <span className="text-slate-400 text-xs block">Grupo</span>
-              <strong>{grupoSelec?.nombre}</strong>
+          <div>
+            <h2 className="text-base font-semibold text-slate-800 mb-1">Distribución para Prueba Institucional</h2>
+            <p className="text-sm text-slate-500 max-w-xs">
+              Mezcla los estudiantes activos de toda la secundaria (incluidos los MEF) en {numSalones} salones,
+              repartiendo cada curso entre todos para reducir el riesgo de copia. Los retirados no se incluyen.
             </p>
-            <p>
-              <span className="text-slate-400 text-xs block">Asignatura</span>
-              <strong>{asigSelec?.nombre}</strong>
-            </p>
-            {tipo === 'notas' && (
-              <p>
-                <span className="text-slate-400 text-xs block">{labelPer}</span>
-                <strong>{periodo}</strong>
-              </p>
-            )}
           </div>
-        )}
 
-        <button
-          onClick={handleImprimir}
-          disabled={!canPrint || generando}
-          className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-blue-600 text-white font-semibold text-sm shadow hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {generando ? (
+          <button
+            onClick={handleGenerarSalones}
+            disabled={generandoSalones}
+            className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-blue-600 text-white font-semibold text-sm shadow hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {generandoSalones ? (
+              <>
+                <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                Mezclando...
+              </>
+            ) : (
+              <><span>🎲</span> {salonesPreview ? 'Volver a mezclar' : 'Generar distribución'}</>
+            )}
+          </button>
+
+          {salonesPreview && (
             <>
-              <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-              Generando...
+              <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-left text-xs text-slate-700 w-full max-w-sm">
+                <p className="font-semibold text-slate-500 uppercase tracking-wide text-[10px] mb-2">
+                  Vista previa · {salonesPreview.reduce((s, sal) => s + sal.length, 0)} estudiantes
+                </p>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                  {salonesPreview.map((sal, i) => (
+                    <div key={i} className="rounded-lg bg-white border border-slate-200 px-2 py-1.5 text-center">
+                      <p className="text-slate-400 text-[9px]">Salón {i + 1}</p>
+                      <p className="font-bold text-slate-800">{sal.length}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={handleImprimirSalones}
+                className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-600 text-white font-semibold text-sm shadow hover:bg-emerald-700 active:scale-95 transition-all"
+              >
+                <span>🖨</span> Imprimir / Guardar PDF
+              </button>
             </>
-          ) : (
-            <><span>🖨</span> Imprimir / Guardar PDF</>
           )}
-        </button>
 
-        {!canPrint && (
-          <p className="text-xs text-slate-400">Seleccione grupo y asignatura para continuar</p>
-        )}
-
-        <p className="text-[10px] text-slate-300 max-w-xs">
-          Se abrirá una nueva ventana. En el diálogo de impresión puede elegir "Guardar como PDF" para exportar el archivo.
-        </p>
-      </div>
+          <p className="text-[10px] text-slate-300 max-w-xs">
+            Se abrirá una nueva ventana con un salón por página. En el diálogo de impresión puede elegir "Guardar como PDF".
+          </p>
+        </div>
+      )}
     </div>
   );
 }
