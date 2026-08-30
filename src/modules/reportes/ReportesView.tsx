@@ -18,6 +18,8 @@ const PRINT_CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; padding: 12px; }
 .header { text-align: center; border-bottom: 1.5px solid #333; padding-bottom: 8px; margin-bottom: 14px; }
+.header-row { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.header-row .logo { height: 40px; width: auto; flex-shrink: 0; }
 .header h1 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
 .header h2 { font-size: 11px; margin-top: 5px; }
 .sub { font-size: 9px; color: #666; margin-top: 3px; }
@@ -46,6 +48,8 @@ const SALON_CSS = `
 body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 28px; }
 .salon-page { page-break-after: always; }
 .header { text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 9px; margin-bottom: 13px; }
+.header-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.header-row .logo { height: 52px; width: auto; flex-shrink: 0; }
 .header h1 { font-size: 17px; text-transform: uppercase; letter-spacing: 0.5px; color: #333; }
 .header .sub { font-size: 11px; color: #666; margin-top: 2px; }
 .salon-titulo { font-size: 40px; font-weight: 900; color: #1e3a8a; margin: 6px 0 1px; letter-spacing: 1px; line-height: 1; }
@@ -61,12 +65,20 @@ body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 28p
 }
 `;
 
+const LOGO_URL = `${window.location.origin}/logo-iermpb.jpg`;
+const UBICACION = 'La Punta de los Remedios, Uribia - La Guajira';
+
 function reportEncabezado(titulo: string, sub1: string, sub2 = ''): string {
   const hoy = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
   return `
     <div class="header">
-      <h1>I.E. Rural Miguel Pinedo Barros</h1>
-      <p class="sub">La Punta de los Remedios · Uribia, La Guajira · ${new Date().getFullYear()}</p>
+      <div class="header-row">
+        <img class="logo" src="${LOGO_URL}" alt="" />
+        <div>
+          <h1>I.E. Rural Miguel Pinedo Barros</h1>
+          <p class="sub">${UBICACION} · ${new Date().getFullYear()}</p>
+        </div>
+      </div>
       <h2>${titulo}</h2>
       <p class="sub">${sub1}${sub2 ? ' · ' + sub2 : ''}</p>
       <p class="sub">Fecha: ${hoy} · Docente: J. González</p>
@@ -265,8 +277,13 @@ function imprimirSalones(salones: Salones, tituloExamen: string, anio: number): 
     return `
       <div class="salon-page">
         <div class="header">
-          <h1>I.E. Rural Miguel Pinedo Barros</h1>
-          <p class="sub">La Punta de los Remedios · Uribia, La Guajira · ${anio}</p>
+          <div class="header-row">
+            <img class="logo" src="${LOGO_URL}" alt="" />
+            <div>
+              <h1>I.E. Rural Miguel Pinedo Barros</h1>
+              <p class="sub">${UBICACION} · ${anio}</p>
+            </div>
+          </div>
           <div class="salon-titulo">SALÓN ${idx + 1}</div>
           <p class="salon-examen">${tituloExamen}</p>
           <p class="sub">Fecha: ${hoy}</p>
