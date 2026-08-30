@@ -51,9 +51,15 @@ export async function generarDistribucionSalones(
       (p) => !retiradosKeys.has(`${p.estudiante.tipo_doc}-${p.estudiante.doc}`),
     );
 
-    const nombres = shuffle(activosFiltrados.map((p) => formatNombre(p.estudiante)));
+    // El orden de salones también se baraja por grupo: si no, el "sobrante" de
+    // cada curso (cuando su cantidad de estudiantes no es múltiplo exacto de
+    // numSalones) siempre cae en los salones 1, 2, 3... acumulándose ahí
+    // curso tras curso y dejando los últimos salones sistemáticamente más vacíos.
+    const nombres      = shuffle(activosFiltrados.map((p) => formatNombre(p.estudiante)));
+    const ordenSalones = shuffle(Array.from({ length: numSalones }, (_, i) => i));
     nombres.forEach((nombreCompleto, i) => {
-      salones[i % numSalones].push({ nombreCompleto, grupoNombre: grupo.nombre });
+      const salonIdx = ordenSalones[i % numSalones];
+      salones[salonIdx].push({ nombreCompleto, grupoNombre: grupo.nombre });
     });
   }
 
