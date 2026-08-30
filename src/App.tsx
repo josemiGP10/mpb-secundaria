@@ -233,7 +233,7 @@ function HomeScreen({
       <section>
         <h2 className="text-xl font-bold text-slate-900 mb-1">Diario Pedagógico</h2>
         <p className="text-sm text-slate-500">
-          I.E. Rural Miguel Pinedo Barros · La Punta de los Remedios, Uribia - La Guajira
+          I.E. Rural Miguel Pinedo Barros · La Punta de los Remedios, Dibulla - La Guajira
         </p>
       </section>
 

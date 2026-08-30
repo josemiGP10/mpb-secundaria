@@ -66,7 +66,7 @@ body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 28p
 `;
 
 const LOGO_URL = `${window.location.origin}/logo-iermpb.jpg`;
-const UBICACION = 'La Punta de los Remedios, Uribia - La Guajira';
+const UBICACION = 'La Punta de los Remedios, Dibulla - La Guajira';
 
 function reportEncabezado(titulo: string, sub1: string, sub2 = ''): string {
   const hoy = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
