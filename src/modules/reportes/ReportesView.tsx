@@ -34,8 +34,28 @@ td, th { border: 0.5px solid #aaa; padding: 3px 5px; vertical-align: middle; }
 .rojo  { color: #991b1b; }
 .footer { margin-top: 14px; font-size: 9px; color: #888; display: flex; justify-content: space-between; }
 .firma { margin-top: 36px; border-top: 0.5px solid #aaa; width: 180px; text-align: center; padding-top: 4px; font-size: 9px; color: #555; }
+@media print {
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+`;
+
+// ── CSS del listado de salones — para pegar en cartelera ────
+// Letra grande y a dos columnas: se lee de pie, no en un escritorio.
+const SALON_CSS = `
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 28px; }
 .salon-page { page-break-after: always; }
-.firma-cell { width: 100px; }
+.header { text-align: center; border-bottom: 3px solid #1e3a8a; padding-bottom: 9px; margin-bottom: 13px; }
+.header h1 { font-size: 17px; text-transform: uppercase; letter-spacing: 0.5px; color: #333; }
+.header .sub { font-size: 11px; color: #666; margin-top: 2px; }
+.salon-titulo { font-size: 40px; font-weight: 900; color: #1e3a8a; margin: 6px 0 1px; letter-spacing: 1px; line-height: 1; }
+.salon-examen { font-size: 17px; font-weight: 600; color: #333; margin-top: 2px; }
+.lista { column-count: 2; column-gap: 28px; }
+.item { break-inside: avoid; display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #ddd; }
+.item .num { font-size: 14px; font-weight: 700; color: #94a3b8; width: 24px; flex-shrink: 0; }
+.item .nombre { font-size: 17px; font-weight: 600; flex: 1; line-height: 1.1; }
+.item .grado { font-size: 13px; font-weight: 700; color: #1e3a8a; background: #dbeafe; padding: 2px 8px; border-radius: 7px; flex-shrink: 0; white-space: nowrap; }
+.salon-footer { margin-top: 11px; font-size: 11px; color: #888; text-align: center; }
 @media print {
   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
@@ -54,7 +74,7 @@ function reportEncabezado(titulo: string, sub1: string, sub2 = ''): string {
   `;
 }
 
-function abrirVentana(titulo: string, cuerpo: string): void {
+function abrirVentana(titulo: string, cuerpo: string, css: string = PRINT_CSS): void {
   const win = window.open('', '_blank', 'width=960,height=720');
   if (!win) {
     alert('Permita ventanas emergentes en su navegador para imprimir.');
@@ -62,7 +82,7 @@ function abrirVentana(titulo: string, cuerpo: string): void {
   }
   win.document.write(
     `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">` +
-    `<title>${titulo}</title><style>${PRINT_CSS}</style></head>` +
+    `<title>${titulo}</title><style>${css}</style></head>` +
     `<body>${cuerpo}</body></html>`,
   );
   win.document.close();
@@ -232,36 +252,33 @@ async function imprimirAsistencia(
 }
 
 function imprimirSalones(salones: Salones, tituloExamen: string, anio: number): void {
+  const hoy = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
+
   const bloques = salones.map((estudiantes, idx) => {
-    const filas = estudiantes.map((e, i) => `
-      <tr>
-        <td class="num">${i + 1}</td>
-        <td class="nombre">${e.nombreCompleto}</td>
-        <td class="c">${e.grupoNombre}</td>
-        <td class="c firma-cell"></td>
-      </tr>`).join('');
+    const items = estudiantes.map((e, i) => `
+      <div class="item">
+        <span class="num">${i + 1}.</span>
+        <span class="nombre">${e.nombreCompleto}</span>
+        <span class="grado">${e.grupoNombre}</span>
+      </div>`).join('');
 
     return `
       <div class="salon-page">
-        ${reportEncabezado(tituloExamen, `Salón ${idx + 1} de ${salones.length}`, `Año ${anio}`)}
-        <table>
-          <thead><tr>
-            <th class="num">Nº</th>
-            <th class="nombre">Estudiante</th>
-            <th class="c">Grado</th>
-            <th class="c">Firma</th>
-          </tr></thead>
-          <tbody>${filas}</tbody>
-        </table>
-        <div class="footer">
-          <span>Total: ${estudiantes.length} estudiantes</span>
-          <span>Salón ${idx + 1} de ${salones.length}</span>
+        <div class="header">
+          <h1>I.E. Rural Miguel Pinedo Barros</h1>
+          <p class="sub">La Punta de los Remedios · Uribia, La Guajira · ${anio}</p>
+          <div class="salon-titulo">SALÓN ${idx + 1}</div>
+          <p class="salon-examen">${tituloExamen}</p>
+          <p class="sub">Fecha: ${hoy}</p>
         </div>
-        <div class="firma">Docente encargado(a)</div>
+        <div class="lista">${items}</div>
+        <div class="salon-footer">
+          Total: ${estudiantes.length} estudiantes · Salón ${idx + 1} de ${salones.length}
+        </div>
       </div>`;
   }).join('');
 
-  abrirVentana(`Distribución ${tituloExamen}`, bloques);
+  abrirVentana(`Distribución ${tituloExamen}`, bloques, SALON_CSS);
 }
 
 // ── Componente principal ────────────────────────────────────
