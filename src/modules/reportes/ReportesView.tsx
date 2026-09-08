@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/db/database';
+import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
 import { cargarActividades, cargarFilasGrupo } from '../calificaciones/calificacionesService';
 import { generarDistribucionSalones, type Salones } from './salonesService';
 import type { Area, Asignatura, Grupo } from '@/db/types';
@@ -188,21 +188,27 @@ async function imprimirAsistencia(
   grupoId: string, asigId: string, anio: number,
   grupoNombre: string, asigNombre: string,
 ): Promise<void> {
-  const matriculas = await db.matriculas
-    .where('[grupo_id+anio]').equals([grupoId, anio]).toArray();
-
-  const estudiantesRaw = await db.estudiantes.bulkGet(matriculas.map(m => m.estudiante_id));
-  const estMap = new Map(
-    estudiantesRaw.filter(Boolean).map(e => [e!.id, e!]),
+  const [paresActivos, paresRetirados] = await Promise.all([
+    getEstudiantesPorGrupo(grupoId, anio),
+    getEstudiantesRetiradosPorGrupo(grupoId, anio),
+  ]);
+  // Mismo criterio que Asistencia/Notas/Salones: si hay matrículas duplicadas
+  // (siembra multi-dispositivo), un mismo estudiante puede aparecer como
+  // activo Y retirado — la versión retirada tiene precedencia y se excluye.
+  const retiradosKeys = new Set(
+    paresRetirados.map(p => `${p.estudiante.tipo_doc}-${p.estudiante.doc}`),
+  );
+  const pares = paresActivos.filter(
+    p => !retiradosKeys.has(`${p.estudiante.tipo_doc}-${p.estudiante.doc}`),
   );
 
-  const matriculaIds = new Set(matriculas.map(m => m.id));
+  const matriculaIds = new Set(pares.map(p => p.matricula.id));
   const todosRegistros = await db.registros_asistencia
     .where('asignatura_id').equals(asigId).toArray();
   const registros = todosRegistros.filter(r => matriculaIds.has(r.matricula_id));
 
   const conteo: Record<string, { asiste: number; fj: number; fi: number }> = {};
-  for (const m of matriculas) conteo[m.id] = { asiste: 0, fj: 0, fi: 0 };
+  for (const p of pares) conteo[p.matricula.id] = { asiste: 0, fj: 0, fi: 0 };
   for (const r of registros) {
     if (!conteo[r.matricula_id]) continue;
     if (r.estado === 'ASISTE') conteo[r.matricula_id].asiste++;
@@ -210,29 +216,26 @@ async function imprimirAsistencia(
     else if (r.estado === 'FI')    conteo[r.matricula_id].fi++;
   }
 
-  const filas = matriculas
-    .map(m => {
-      const est = estMap.get(m.estudiante_id);
-      if (!est) return null;
-      const nombre = [est.apellido1, est.apellido2, est.nombre1, est.nombre2].filter(Boolean).join(' ');
-      const { asiste, fj, fi } = conteo[m.id] ?? { asiste: 0, fj: 0, fi: 0 };
+  const filas = pares
+    .map(({ matricula, estudiante }) => {
+      const nombre = [estudiante.apellido1, estudiante.apellido2, estudiante.nombre1, estudiante.nombre2].filter(Boolean).join(' ');
+      const { asiste, fj, fi } = conteo[matricula.id] ?? { asiste: 0, fj: 0, fi: 0 };
       const total = asiste + fj + fi;
       const pct   = total > 0 ? Math.round((asiste / total) * 100) : 100;
       return { nombre, asiste, fj, fi, total, pct };
     })
-    .filter(Boolean)
-    .sort((a, b) => a!.nombre.localeCompare(b!.nombre, 'es'));
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 
   const tbody = filas.map((f, i) => {
-    const cls = f!.pct < 80 ? 'rojo' : 'verde';
+    const cls = f.pct < 80 ? 'rojo' : 'verde';
     return `<tr>
       <td class="num">${i + 1}</td>
-      <td class="nombre">${f!.nombre}</td>
-      <td class="c">${f!.asiste}</td>
-      <td class="c">${f!.fj}</td>
-      <td class="c">${f!.fi}</td>
-      <td class="c">${f!.total}</td>
-      <td class="final ${cls}">${f!.pct}%</td>
+      <td class="nombre">${f.nombre}</td>
+      <td class="c">${f.asiste}</td>
+      <td class="c">${f.fj}</td>
+      <td class="c">${f.fi}</td>
+      <td class="c">${f.total}</td>
+      <td class="final ${cls}">${f.pct}%</td>
     </tr>`;
   }).join('');
 
