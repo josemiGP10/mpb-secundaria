@@ -35,8 +35,15 @@ type Estudiante = {
   fecha_nacimiento: string; created_at: string; updated_at: string;
 };
 
+// ID determinístico por documento: si esta siembra corre en un dispositivo
+// nuevo, genera el MISMO id que en cualquier otro dispositivo para el mismo
+// estudiante, en vez de un uuid() aleatorio distinto cada vez. Un uuid()
+// aleatorio aquí fue la causa de que cada dispositivo nuevo (celular, tablet,
+// PC tras borrar datos) creara una copia fantasma completa del listado y la
+// subiera a Supabase como si fueran estudiantes nuevos — 927 duplicados
+// detectados en la base compartida antes de este fix.
 function e(doc: string, td: string, a1: string, a2: string, n1: string, n2 = ''): Estudiante {
-  return { id: uuid(), tipo_doc: td, doc, apellido1: a1, apellido2: a2,
+  return { id: `est-${td}-${doc}`, tipo_doc: td, doc, apellido1: a1, apellido2: a2,
            nombre1: n1, nombre2: n2, fecha_nacimiento: '2010-01-01', created_at: NOW, updated_at: NOW };
 }
 
@@ -486,11 +493,12 @@ export async function sembrarDatos(): Promise<void> {
     await db.grupo_asignaturas.bulkAdd(ga);
 
     // Estudiantes + matrículas por grupo
+    // (id de matrícula también determinístico, por la misma razón que el de estudiante)
     for (const { grupoId, estudiantes } of GRUPOS_MAP) {
       await db.estudiantes.bulkAdd(estudiantes);
       await db.matriculas.bulkAdd(
         estudiantes.map(est => ({
-          id: uuid(), estudiante_id: est.id, grupo_id: grupoId,
+          id: `mat-${est.id}-${grupoId}-2026`, estudiante_id: est.id, grupo_id: grupoId,
           anio: 2026, activo: true, created_at: NOW, updated_at: NOW,
         }))
       );

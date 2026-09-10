@@ -36,12 +36,15 @@ export function App() {
   // ── Inicialización: seed + primera bajada si no hay datos ─
   useEffect(() => {
     const init = async () => {
+      // Detectar "dispositivo nuevo" ANTES de sembrar: sembrarDatos() ya crea
+      // los grupos localmente, así que revisar el conteo después siempre daba
+      // >0 y esta bajada inicial nunca se ejecutaba.
+      const { db } = await import('./db/database');
+      const eraDispositivoNuevo = (await db.grupos.count()) === 0;
+
       await sembrarDatos();
 
-      // Si es un dispositivo nuevo (sin grupos en local) y hay internet → bajar todo
-      const { db } = await import('./db/database');
-      const grupos = await db.grupos.count();
-      if (grupos === 0 && navigator.onLine) {
+      if (eraDispositivoNuevo && navigator.onLine) {
         setSincronizando(true);
         try {
           const res = await sincronizarBajada();
