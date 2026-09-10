@@ -3,6 +3,25 @@ import { db, getCalificacion, getEstudiantesPorGrupo, getEstudiantesRetiradosPor
 import { calcularNota, buildGradeInput } from './gradeEngine';
 import type { ActividadCognitiva, Calificacion, TipoAsignatura } from '@/db/types';
 
+// ── Cola de escritura por calificación ─────────────────────
+// Si el docente edita varias actividades cognitivas seguidas (o una
+// actividad y luego social/personal/prueba) muy rápido, cada edición
+// dispara su propio guardarNotaActividad/guardarCalificacion de forma
+// asíncrona. Sin esto, dos llamadas para la MISMA calificación pueden
+// intercalarse: la que arrancó primero puede terminar de escribir DESPUÉS
+// de la más reciente, pisando la nota_final correcta con un cálculo hecho
+// sobre notas cognitivas desactualizadas (caso real detectado: notas
+// [1,3,8] guardadas pero nota_final=7.4 congelada de un estado anterior
+// con una sola nota=7).
+const colasPorCalificacion = new Map<string, Promise<unknown>>();
+
+function encolarPorCalificacion<T>(calificacionId: string, tarea: () => Promise<T>): Promise<T> {
+  const anterior = colasPorCalificacion.get(calificacionId) ?? Promise.resolve();
+  const actual = anterior.then(tarea, tarea);
+  colasPorCalificacion.set(calificacionId, actual.then(() => undefined, () => undefined));
+  return actual;
+}
+
 // ── Tipos de trabajo del módulo ────────────────────────────
 
 export interface NotaActividadEntry {
@@ -73,25 +92,30 @@ export async function guardarNotaActividad(
   actividadId: string,
   valor: number,
 ): Promise<NotaActividadEntry> {
-  const existing = await db.notas_cognitivas
-    .where('[calificacion_id+actividad_id]')
-    .equals([calificacionId, actividadId])
-    .first();
+  // Misma cola que guardarCalificacion: si esta escritura y un recálculo de
+  // nota_final para la misma calificación se disparan casi al tiempo (varias
+  // actividades editadas seguidas), deben quedar en fila y no intercalarse.
+  return encolarPorCalificacion(calificacionId, async () => {
+    const existing = await db.notas_cognitivas
+      .where('[calificacion_id+actividad_id]')
+      .equals([calificacionId, actividadId])
+      .first();
 
-  if (existing) {
-    await db.notas_cognitivas.put({ ...existing, valor });
-    return { notaId: existing.id, valor };
-  }
+    if (existing) {
+      await db.notas_cognitivas.put({ ...existing, valor });
+      return { notaId: existing.id, valor };
+    }
 
-  const nota = {
-    id: uuidv4(),
-    calificacion_id: calificacionId,
-    actividad_id: actividadId,
-    valor,
-    created_at: new Date().toISOString(),
-  };
-  await db.notas_cognitivas.add(nota);
-  return { notaId: nota.id, valor };
+    const nota = {
+      id: uuidv4(),
+      calificacion_id: calificacionId,
+      actividad_id: actividadId,
+      valor,
+      created_at: new Date().toISOString(),
+    };
+    await db.notas_cognitivas.add(nota);
+    return { notaId: nota.id, valor };
+  });
 }
 
 export async function borrarNotaActividad(notaId: string): Promise<void> {
@@ -164,34 +188,36 @@ export async function guardarCalificacion(
   },
   tipo: TipoAsignatura,
 ): Promise<number | undefined> {
-  const cal = await db.calificaciones.get(calificacionId);
-  if (!cal) throw new Error('Calificación no encontrada');
+  return encolarPorCalificacion(calificacionId, async () => {
+    const cal = await db.calificaciones.get(calificacionId);
+    if (!cal) throw new Error('Calificación no encontrada');
 
-  const notas = await db.notas_cognitivas
-    .where('calificacion_id')
-    .equals(calificacionId)
-    .filter((n) => !!n.actividad_id)
-    .toArray();
+    const notas = await db.notas_cognitivas
+      .where('calificacion_id')
+      .equals(calificacionId)
+      .filter((n) => !!n.actividad_id)
+      .toArray();
 
-  let nota_final: number | undefined;
-  if (notas.length > 0) {
-    const input = buildGradeInput(
-      tipo,
-      notas.map((n) => n.valor),
-      campos.prueba_institucional,
-      campos.nota_social,
-      campos.nota_personal,
-    );
-    nota_final = calcularNota(input).nota_final;
-  }
+    let nota_final: number | undefined;
+    if (notas.length > 0) {
+      const input = buildGradeInput(
+        tipo,
+        notas.map((n) => n.valor),
+        campos.prueba_institucional,
+        campos.nota_social,
+        campos.nota_personal,
+      );
+      nota_final = calcularNota(input).nota_final;
+    }
 
-  await db.calificaciones.put({
-    ...cal,
-    ...campos,
-    nota_final,
-    updated_at: new Date().toISOString(),
+    await db.calificaciones.put({
+      ...cal,
+      ...campos,
+      nota_final,
+      updated_at: new Date().toISOString(),
+    });
+    return nota_final;
   });
-  return nota_final;
 }
 
 // ── Helpers privados ───────────────────────────────────────
