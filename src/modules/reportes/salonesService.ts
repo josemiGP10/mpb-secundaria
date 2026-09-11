@@ -1,10 +1,4 @@
-import { supabase } from '@/lib/supabase';
-import { getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
-
-function client() {
-  if (!supabase) throw new Error('Supabase no configurado.');
-  return supabase;
-}
+import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
 
 export interface EstudianteSalon {
   nombreCompleto: string;
@@ -38,9 +32,8 @@ export async function generarDistribucionSalones(
   anio:       number,
   numSalones: number,
 ): Promise<Salones> {
-  const { data: grupos, error } = await client().from('grupos').select('*').eq('anio', anio);
-  if (error) throw new Error(error.message);
-  const gruposOrdenados = [...(grupos ?? [])].sort((a, b) =>
+  const grupos = await db.grupos.where('anio').equals(anio).toArray();
+  const gruposOrdenados = [...grupos].sort((a, b) =>
     a.grado_cod !== b.grado_cod ? a.grado_cod - b.grado_cod : a.nombre.localeCompare(b.nombre, 'es'),
   );
 

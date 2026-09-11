@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useSupaQuery } from '@/db/useSupaQuery';
-import { bulkGet } from '@/db/database';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/db/database';
 import {
   getEstudiantesRetiradosPorGrupo,
   getEstudiantesPorGrupo,
@@ -64,25 +63,17 @@ export function AsistenciaView() {
   const [mes,            setMes]            = useState(mesBogota);
   const [modalGestionar, setModalGestionar] = useState(false);
 
-  const grupos = useSupaQuery(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('grupos').select('*').eq('anio', anio);
-    if (error) throw new Error(error.message);
-    return data ?? [];
+  const grupos = useLiveQuery(async () => {
+    return db.grupos.where('anio').equals(anio).toArray();
   }, [anio]);
 
-  const asignaturas = useSupaQuery(async () => {
-    if (!supabase || !grupoId) return [];
-    const { data: links, error } = await supabase.from('grupo_asignaturas').select('*').eq('grupo_id', grupoId);
-    if (error) throw new Error(error.message);
-    if (!links || links.length === 0) {
-      const { data, error: e2 } = await supabase.from('asignaturas').select('*');
-      if (e2) throw new Error(e2.message);
-      return (data ?? []).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-    }
+  const asignaturas = useLiveQuery(async () => {
+    if (!grupoId) return [];
+    const links = await db.grupo_asignaturas.where('grupo_id').equals(grupoId).toArray();
+    if (links.length === 0) return db.asignaturas.toArray();
     const ids = [...new Set(links.map((l) => l.asignatura_id))];
-    const asigsMap = await bulkGet<{ id: string; nombre: string }>('asignaturas', ids);
-    return [...asigsMap.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    const all = (await db.asignaturas.bulkGet(ids)).filter((x): x is NonNullable<typeof x> => x != null);
+    return all.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }, [grupoId, anio]);
 
   // ── Estado vista día ───────────────────────────────────

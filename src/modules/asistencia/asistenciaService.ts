@@ -1,12 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { supabase } from '@/lib/supabase';
-import { getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
+import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
 import type { EstadoAsistencia, RegistroAsistencia, RegistroClase } from '@/db/types';
-
-function client() {
-  if (!supabase) throw new Error('Supabase no configurado.');
-  return supabase;
-}
 
 // ── Tipos de UI ────────────────────────────────────────────
 
@@ -60,8 +54,8 @@ export async function cargarAsistenciaGrupo(
     getEstudiantesRetiradosPorGrupo(grupoId, anio),
   ]);
 
-  // Si hay matrículas duplicadas (heredadas), un mismo estudiante puede
-  // aparecer como activo Y retirado. La versión retirada tiene precedencia.
+  // Si hay matrículas duplicadas (siembra multi-dispositivo), un mismo estudiante
+  // puede aparecer como activo Y retirado. La versión retirada tiene precedencia.
   const retiradosKeys = new Set(
     paresRetirados.map(p => `${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
   );
@@ -69,11 +63,15 @@ export async function cargarAsistenciaGrupo(
     p => !retiradosKeys.has(`${p.estudiante.tipo_doc}-${p.estudiante.doc}`)
   );
 
-  const { data, error } = await client()
-    .from('registros_asistencia').select('*')
-    .eq('asignatura_id', asignaturaId).eq('hora_bloque', 1);
-  if (error) throw new Error(error.message);
-  const todosRegistros = (data ?? []) as RegistroAsistencia[];
+  const todosRegistros = await db.registros_asistencia
+    .where('[matricula_id+asignatura_id+fecha]')
+    .between(
+      ['', asignaturaId, '0000-00-00'],
+      ['￿', asignaturaId, '9999-99-99'],
+      true, true,
+    )
+    .filter((r) => r.asignatura_id === asignaturaId && r.hora_bloque === 1)
+    .toArray();
 
   const porMatricula = new Map<string, RegistroAsistencia[]>();
   for (const r of todosRegistros) {
@@ -132,12 +130,15 @@ export async function cargarAsistenciaMes(
   const desde  = `${anio}-${mesStr}-01`;
   const hasta  = `${anio}-${mesStr}-31`;
 
-  const { data, error } = await client()
-    .from('registros_asistencia').select('*')
-    .eq('asignatura_id', asignaturaId).eq('hora_bloque', 1)
-    .gte('fecha', desde).lte('fecha', hasta);
-  if (error) throw new Error(error.message);
-  const registros = (data ?? []) as RegistroAsistencia[];
+  const registros = await db.registros_asistencia
+    .where('[matricula_id+asignatura_id+fecha]')
+    .between(
+      ['', asignaturaId, desde],
+      ['￿', asignaturaId, hasta],
+      true, true,
+    )
+    .filter((r) => r.asignatura_id === asignaturaId && r.hora_bloque === 1)
+    .toArray();
 
   const fechasSet = new Set(registros.map((r) => r.fecha));
   const fechas    = [...fechasSet].sort();
@@ -172,8 +173,7 @@ export async function toggleEstadoHoy(
   // Cicló hasta null → borrar registro
   if (siguiente === null) {
     if (fila.registroIdHoy) {
-      const { error } = await client().from('registros_asistencia').delete().eq('id', fila.registroIdHoy);
-      if (error) throw new Error(error.message);
+      await db.registros_asistencia.delete(fila.registroIdHoy);
     }
     return {
       estadoHoy:     null,
@@ -189,9 +189,10 @@ export async function toggleEstadoHoy(
   let registroId = fila.registroIdHoy;
 
   if (registroId) {
-    const { error } = await client().from('registros_asistencia')
-      .update({ estado: siguiente, created_at: now }).eq('id', registroId);
-    if (error) throw new Error(error.message);
+    const existing = await db.registros_asistencia.get(registroId);
+    if (existing) {
+      await db.registros_asistencia.put({ ...existing, estado: siguiente, created_at: now });
+    }
   } else {
     const nuevo: RegistroAsistencia = {
       id:            uuidv4(),
@@ -202,8 +203,7 @@ export async function toggleEstadoHoy(
       estado:        siguiente,
       created_at:    now,
     };
-    const { error } = await client().from('registros_asistencia').insert(nuevo);
-    if (error) throw new Error(error.message);
+    await db.registros_asistencia.add(nuevo);
     registroId = nuevo.id;
   }
 
@@ -240,8 +240,7 @@ export async function setEstadoDirecto(
 
   if (siguiente === null) {
     if (fila.registroIdHoy) {
-      const { error } = await client().from('registros_asistencia').delete().eq('id', fila.registroIdHoy);
-      if (error) throw new Error(error.message);
+      await db.registros_asistencia.delete(fila.registroIdHoy);
     }
     return {
       estadoHoy:     null,
@@ -256,9 +255,10 @@ export async function setEstadoDirecto(
 
   let registroId = fila.registroIdHoy;
   if (registroId) {
-    const { error } = await client().from('registros_asistencia')
-      .update({ estado: siguiente, created_at: now }).eq('id', registroId);
-    if (error) throw new Error(error.message);
+    const existing = await db.registros_asistencia.get(registroId);
+    if (existing) {
+      await db.registros_asistencia.put({ ...existing, estado: siguiente, created_at: now });
+    }
   } else {
     const nuevo: RegistroAsistencia = {
       id:            uuidv4(),
@@ -269,8 +269,7 @@ export async function setEstadoDirecto(
       estado:        siguiente,
       created_at:    now,
     };
-    const { error } = await client().from('registros_asistencia').insert(nuevo);
-    if (error) throw new Error(error.message);
+    await db.registros_asistencia.add(nuevo);
     registroId = nuevo.id;
   }
 
@@ -304,28 +303,21 @@ export async function toggleEstadoFecha(
   const siguiente = ciclarEstado(estadoActual);
   const now       = new Date().toISOString();
 
-  const { data, error: eSel } = await client()
-    .from('registros_asistencia').select('*')
-    .eq('matricula_id', matriculaId).eq('asignatura_id', asignaturaId)
-    .eq('fecha', fecha).eq('hora_bloque', 1)
-    .maybeSingle();
-  if (eSel) throw new Error(eSel.message);
-  const existente = data as RegistroAsistencia | null;
+  const existente = await db.registros_asistencia
+    .where('[matricula_id+asignatura_id+fecha]')
+    .equals([matriculaId, asignaturaId, fecha])
+    .filter((r) => r.hora_bloque === 1)
+    .first();
 
   if (siguiente === null) {
-    if (existente) {
-      const { error } = await client().from('registros_asistencia').delete().eq('id', existente.id);
-      if (error) throw new Error(error.message);
-    }
+    if (existente) await db.registros_asistencia.delete(existente.id);
     return null;
   }
 
   if (existente) {
-    const { error } = await client().from('registros_asistencia')
-      .update({ estado: siguiente, created_at: now }).eq('id', existente.id);
-    if (error) throw new Error(error.message);
+    await db.registros_asistencia.put({ ...existente, estado: siguiente, created_at: now });
   } else {
-    const { error } = await client().from('registros_asistencia').insert({
+    await db.registros_asistencia.add({
       id:            uuidv4(),
       matricula_id:  matriculaId,
       asignatura_id: asignaturaId,
@@ -334,7 +326,6 @@ export async function toggleEstadoFecha(
       estado:        siguiente,
       created_at:    now,
     });
-    if (error) throw new Error(error.message);
   }
 
   return siguiente;
@@ -349,7 +340,6 @@ export async function tomarListaCompleta(
 ): Promise<FilaAsistencia[]> {
   const now     = new Date().toISOString();
   const nuevas: FilaAsistencia[] = [];
-  const aInsertar: RegistroAsistencia[] = [];
 
   for (const fila of filas) {
     if (fila.retirado || fila.estadoHoy !== null) {
@@ -366,7 +356,7 @@ export async function tomarListaCompleta(
       estado:        'ASISTE',
       created_at:    now,
     };
-    aInsertar.push(nuevo);
+    await db.registros_asistencia.add(nuevo);
 
     nuevas.push({
       ...fila,
@@ -375,11 +365,6 @@ export async function tomarListaCompleta(
       totalSesiones: fila.totalSesiones + 1,
       asistidas:     fila.asistidas + 1,
     });
-  }
-
-  if (aInsertar.length > 0) {
-    const { error } = await client().from('registros_asistencia').insert(aInsertar);
-    if (error) throw new Error(error.message);
   }
 
   return nuevas;
@@ -393,12 +378,10 @@ export async function cargarRegistroClaseDia(
   asignaturaId: string,
   fecha:        string,
 ): Promise<RegistroClase | undefined> {
-  const { data, error } = await client()
-    .from('registros_clase').select('*')
-    .eq('grupo_id', grupoId).eq('asignatura_id', asignaturaId).eq('fecha', fecha)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ?? undefined;
+  return db.registros_clase
+    .where('grupo_id').equals(grupoId)
+    .filter((r) => r.asignatura_id === asignaturaId && r.fecha === fecha)
+    .first();
 }
 
 export async function cargarUltimaObservacionAnterior(
@@ -406,12 +389,14 @@ export async function cargarUltimaObservacionAnterior(
   asignaturaId: string,
   fechaActual:  string,
 ): Promise<RegistroClase | undefined> {
-  const { data, error } = await client()
-    .from('registros_clase').select('*')
-    .eq('grupo_id', grupoId).eq('asignatura_id', asignaturaId)
-    .lt('fecha', fechaActual);
-  if (error) throw new Error(error.message);
-  const anteriores = (data ?? []).filter((r) => !!(r.nota_breve || r.pendiente || r.tarea_desc));
+  const anteriores = await db.registros_clase
+    .where('grupo_id').equals(grupoId)
+    .filter((r) =>
+      r.asignatura_id === asignaturaId &&
+      r.fecha < fechaActual &&
+      !!(r.nota_breve || r.pendiente || r.tarea_desc),
+    )
+    .toArray();
   if (anteriores.length === 0) return undefined;
   anteriores.sort((a, b) => b.fecha.localeCompare(a.fecha));
   return anteriores[0];
@@ -433,13 +418,10 @@ export async function guardarRegistroClaseDia(
   const now = new Date().toISOString();
 
   if (existenteId) {
-    const { data: existente, error: eSel } = await client()
-      .from('registros_clase').select('*').eq('id', existenteId).maybeSingle();
-    if (eSel) throw new Error(eSel.message);
+    const existente = await db.registros_clase.get(existenteId);
     if (existente) {
       const actualizado: RegistroClase = { ...existente, ...campos, updated_at: now };
-      const { error } = await client().from('registros_clase').update(actualizado).eq('id', existenteId);
-      if (error) throw new Error(error.message);
+      await db.registros_clase.put(actualizado);
       return actualizado;
     }
   }
@@ -455,8 +437,7 @@ export async function guardarRegistroClaseDia(
     created_at: now,
     updated_at: now,
   };
-  const { error } = await client().from('registros_clase').insert(nuevo);
-  if (error) throw new Error(error.message);
+  await db.registros_clase.add(nuevo);
   return nuevo;
 }
 

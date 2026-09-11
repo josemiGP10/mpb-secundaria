@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useSupaQuery } from '@/db/useSupaQuery';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/db/database';
 import { clasificarNota } from './gradeEngine';
 
 function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T[] {
@@ -43,31 +43,17 @@ export function CalificacionesView() {
   const [notaMasiva,   setNotaMasiva]   = useState(5.0);
   const [aplicando,    setAplicando]    = useState(false);
 
-  const grupos = useSupaQuery<Grupo[]>(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('grupos').select('*').eq('anio', anio);
-    if (error) throw new Error(error.message);
-    return data ?? [];
+  const grupos = useLiveQuery<Grupo[]>(async () => {
+    return db.grupos.where('anio').equals(anio).toArray();
   }, [anio]);
 
-  const todasAsigs = useSupaQuery<Asignatura[]>(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('asignaturas').select('*');
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, []);
-  const areas = useSupaQuery<Area[]>(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('areas').select('*');
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, []);
+  const todasAsigs = useLiveQuery<Asignatura[]>(() => db.asignaturas.toArray(), []);
+  const areas      = useLiveQuery<Area[]>(      () => db.areas.toArray(), []);
 
-  const asignaturasGrupo = useSupaQuery<Asignatura[]>(async () => {
-    if (!supabase || !todasAsigs || !grupoId) return [];
-    const { data: grupoAsigs, error } = await supabase.from('grupo_asignaturas').select('*').eq('grupo_id', grupoId);
-    if (error) throw new Error(error.message);
-    if (!grupoAsigs || grupoAsigs.length === 0) return todasAsigs;
+  const asignaturasGrupo = useLiveQuery<Asignatura[]>(async () => {
+    if (!todasAsigs || !grupoId) return [];
+    const grupoAsigs = await db.grupo_asignaturas.where('grupo_id').equals(grupoId).toArray();
+    if (grupoAsigs.length === 0) return todasAsigs;
     const ids = new Set(grupoAsigs.map((ga) => ga.asignatura_id));
     return todasAsigs.filter((a) => ids.has(a.id));
   }, [grupoId, anio, todasAsigs]) ?? [];

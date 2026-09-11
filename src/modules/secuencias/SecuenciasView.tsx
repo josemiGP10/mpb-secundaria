@@ -1,14 +1,8 @@
 import { useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuid } from 'uuid';
-import { supabase } from '@/lib/supabase';
-import { useSupaQuery } from '@/db/useSupaQuery';
-import { bulkGet } from '@/db/database';
+import { db } from '@/db/database';
 import type { Secuencia, Sesion, RegistroClase, EstadoSecuencia } from '@/db/types';
-
-function client() {
-  if (!supabase) throw new Error('Supabase no configurado.');
-  return supabase;
-}
 
 function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T[] {
   return [...gs].sort((a, b) =>
@@ -34,34 +28,26 @@ export function SecuenciasView() {
   const [asignaturaId,   setAsignaturaId]   = useState('');
   const [secuenciaId,    setSecuenciaId]    = useState('');
 
-  const grupos = useSupaQuery(async () => {
-    const { data, error } = await client().from('grupos').select('*').eq('anio', anio);
-    if (error) throw new Error(error.message);
-    return data ?? [];
+  const grupos = useLiveQuery(async () => {
+    return db.grupos.where('anio').equals(anio).toArray();
   }, [anio]);
 
-  const asignaturas = useSupaQuery(async () => {
+  const asignaturas = useLiveQuery(async () => {
     if (!grupoId) return [];
-    const { data: links, error } = await client().from('grupo_asignaturas').select('*').eq('grupo_id', grupoId);
-    if (error) throw new Error(error.message);
-    if (!links || links.length === 0) {
-      const { data, error: e2 } = await client().from('asignaturas').select('*');
-      if (e2) throw new Error(e2.message);
-      return data ?? [];
-    }
+    const links = await db.grupo_asignaturas.where('grupo_id').equals(grupoId).toArray();
+    if (links.length === 0) return db.asignaturas.toArray();
     const ids = links.map((l) => l.asignatura_id);
-    const asigsMap = await bulkGet<{ id: string; nombre: string }>('asignaturas', ids);
-    return [...asigsMap.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    const all = (await db.asignaturas.bulkGet(ids)).filter((x): x is NonNullable<typeof x> => x != null);
+    return all.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }, [grupoId]);
 
-  const secuencias = useSupaQuery(async () => {
+  const secuencias = useLiveQuery(async () => {
     if (!grupoId || !asignaturaId) return [];
-    const { data, error } = await client()
-      .from('secuencias').select('*')
-      .eq('grupo_id', grupoId).eq('asignatura_id', asignaturaId).eq('anio', anio)
-      .order('created_at', { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    return db.secuencias
+      .where('[grupo_id+asignatura_id+anio]')
+      .equals([grupoId, asignaturaId, anio])
+      .reverse()
+      .sortBy('created_at');
   }, [grupoId, asignaturaId, anio]);
 
   const openSecuencia = (id: string) => {
@@ -217,8 +203,7 @@ function FormNuevaSecuencia({
       competencias: competencias.trim(), criterios: criterios.trim(),
       estado: 'BORRADOR', created_at: now, updated_at: now,
     };
-    const { error } = await client().from('secuencias').insert(seq);
-    if (error) throw new Error(error.message);
+    await db.secuencias.add(seq);
     setSaving(false);
     onSaved(seq.id);
   };
@@ -315,37 +300,23 @@ function SecuenciaDetalle({
 }) {
   const [subPanel,    setSubPanel]    = useState<DetallePanel>('sesiones');
   const [creandoSes,  setCreandoSes]  = useState(false);
-  const [refreshTick, setRefreshTick] = useState(0);
-  const refrescar = () => setRefreshTick((t) => t + 1);
 
-  const secuencia = useSupaQuery(async () => {
-    const { data, error } = await client().from('secuencias').select('*').eq('id', secuenciaId).maybeSingle();
-    if (error) throw new Error(error.message);
-    return data ?? undefined;
-  }, [secuenciaId, refreshTick]);
+  const secuencia = useLiveQuery(() => db.secuencias.get(secuenciaId), [secuenciaId]);
+  const sesiones  = useLiveQuery(async () => {
+    return db.sesiones.where('secuencia_id').equals(secuenciaId).sortBy('orden');
+  }, [secuenciaId]);
 
-  const sesiones = useSupaQuery(async () => {
-    const { data, error } = await client()
-      .from('sesiones').select('*').eq('secuencia_id', secuenciaId).order('orden');
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, [secuenciaId, refreshTick]);
-
-  const registros = useSupaQuery(async () => {
-    const { data, error } = await client()
-      .from('registros_clase').select('*')
-      .eq('grupo_id', grupoId).eq('asignatura_id', asignaturaId)
-      .order('fecha', { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, [grupoId, asignaturaId, refreshTick]);
+  const registros = useLiveQuery(async () => {
+    return db.registros_clase
+      .where('grupo_id').equals(grupoId)
+      .filter((r) => r.asignatura_id === asignaturaId)
+      .reverse()
+      .sortBy('fecha');
+  }, [grupoId, asignaturaId]);
 
   const cambiarEstado = async (estado: EstadoSecuencia) => {
     if (!secuencia) return;
-    const { error } = await client().from('secuencias')
-      .update({ estado, updated_at: new Date().toISOString() }).eq('id', secuenciaId);
-    if (error) throw new Error(error.message);
-    refrescar();
+    await db.secuencias.update(secuenciaId, { estado, updated_at: new Date().toISOString() });
   };
 
   if (!secuencia) return <Centered>Cargando...</Centered>;
@@ -385,12 +356,10 @@ function SecuenciaDetalle({
               sesion={ses}
               numero={i + 1}
               onToggleCompleta={async () => {
-                const { error } = await client().from('sesiones').update({
+                await db.sesiones.update(ses.id, {
                   completada: !ses.completada,
                   updated_at: new Date().toISOString(),
-                }).eq('id', ses.id);
-                if (error) throw new Error(error.message);
-                refrescar();
+                });
               }}
             />
           ))}
@@ -398,7 +367,7 @@ function SecuenciaDetalle({
             <FormNuevaSesion
               secuenciaId={secuenciaId}
               orden={(sesiones?.length ?? 0) + 1}
-              onSaved={() => { setCreandoSes(false); refrescar(); }}
+              onSaved={() => { setCreandoSes(false); }}
               onCancel={() => setCreandoSes(false)}
             />
           ) : (
@@ -419,7 +388,6 @@ function SecuenciaDetalle({
           asignaturaId={asignaturaId}
           sesiones={sesiones ?? []}
           registros={registros ?? []}
-          onRegistroGuardado={refrescar}
         />
       )}
     </div>
@@ -518,8 +486,7 @@ function FormNuevaSesion({
       cierre: cierre.trim(), recursos: recursos.trim(), duracion_bloques: 1,
       completada: false, created_at: now, updated_at: now,
     };
-    const { error } = await client().from('sesiones').insert(ses);
-    if (error) throw new Error(error.message);
+    await db.sesiones.add(ses);
     setSaving(false);
     onSaved(ses.id);
   };
@@ -585,11 +552,10 @@ function FormNuevaSesion({
 // ─────────────────────────────────────────────────────────────
 
 function RegistroClasePanel({
-  grupoId, asignaturaId, sesiones, registros, onRegistroGuardado,
+  grupoId, asignaturaId, sesiones, registros,
 }: {
   grupoId: string; asignaturaId: string;
   sesiones: Sesion[]; registros: RegistroClase[];
-  onRegistroGuardado: () => void;
 }) {
   const [creando,   setCreando]   = useState(false);
 
@@ -606,7 +572,7 @@ function RegistroClasePanel({
           grupoId={grupoId}
           asignaturaId={asignaturaId}
           sesiones={sesiones}
-          onSaved={() => { setCreando(false); onRegistroGuardado(); }}
+          onSaved={() => setCreando(false)}
           onCancel={() => setCreando(false)}
         />
       ) : (
@@ -673,8 +639,7 @@ function FormRegistro({
       tarea_desc: tareaDesc.trim(), tarea_fecha: tareaFecha,
       hubo_actividad: huboAct, created_at: now, updated_at: now,
     };
-    const { error } = await client().from('registros_clase').insert(reg);
-    if (error) throw new Error(error.message);
+    await db.registros_clase.add(reg);
     setSaving(false);
     onSaved();
   };

@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useSupaQuery } from '@/db/useSupaQuery';
-import { getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
 import { cargarActividades, cargarFilasGrupo } from '../calificaciones/calificacionesService';
 import { generarDistribucionSalones, type Salones } from './salonesService';
 import type { Area, Asignatura, Grupo } from '@/db/types';
@@ -204,11 +203,9 @@ async function imprimirAsistencia(
   );
 
   const matriculaIds = new Set(pares.map(p => p.matricula.id));
-  if (!supabase) throw new Error('Supabase no configurado.');
-  const { data: todosRegistros, error } = await supabase
-    .from('registros_asistencia').select('*').eq('asignatura_id', asigId);
-  if (error) throw new Error(error.message);
-  const registros = (todosRegistros ?? []).filter(r => matriculaIds.has(r.matricula_id));
+  const todosRegistros = await db.registros_asistencia
+    .where('asignatura_id').equals(asigId).toArray();
+  const registros = todosRegistros.filter(r => matriculaIds.has(r.matricula_id));
 
   const conteo: Record<string, { asiste: number; fj: number; fi: number }> = {};
   for (const p of pares) conteo[p.matricula.id] = { asiste: 0, fj: 0, fi: 0 };
@@ -321,30 +318,14 @@ export function ReportesView() {
   const [salonesPreview,   setSalonesPreview]    = useState<Salones | null>(null);
   const [generandoSalones, setGenerandoSalones]  = useState(false);
 
-  const grupos = useSupaQuery<Grupo[]>(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('grupos').select('*').eq('anio', anio);
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, [anio]);
-  const todasAsigs = useSupaQuery<Asignatura[]>(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('asignaturas').select('*');
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, []);
-  const areas = useSupaQuery<Area[]>(async () => {
-    if (!supabase) return [];
-    const { data, error } = await supabase.from('areas').select('*');
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }, []);
+  const grupos     = useLiveQuery<Grupo[]>(     () => db.grupos.where('anio').equals(anio).toArray(), [anio]);
+  const todasAsigs = useLiveQuery<Asignatura[]>(() => db.asignaturas.toArray(), []);
+  const areas      = useLiveQuery<Area[]>(      () => db.areas.toArray(),       []);
 
-  const asignaturasGrupo = useSupaQuery<Asignatura[]>(async () => {
-    if (!supabase || !todasAsigs || !grupoId) return [];
-    const { data: ga, error } = await supabase.from('grupo_asignaturas').select('*').eq('grupo_id', grupoId);
-    if (error) throw new Error(error.message);
-    if (!ga || ga.length === 0) return todasAsigs;
+  const asignaturasGrupo = useLiveQuery<Asignatura[]>(async () => {
+    if (!todasAsigs || !grupoId) return [];
+    const ga = await db.grupo_asignaturas.where('grupo_id').equals(grupoId).toArray();
+    if (ga.length === 0) return todasAsigs;
     const ids = new Set(ga.map(x => x.asignatura_id));
     return todasAsigs.filter(a => ids.has(a.id));
   }, [grupoId, todasAsigs]) ?? [];
