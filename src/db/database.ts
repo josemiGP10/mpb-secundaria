@@ -21,23 +21,7 @@ export async function getEstudiantesPorGrupo(grupoId: string, anio: number) {
   if (error) throw new Error(error.message);
   // Solo activos (activo !== false cubre registros antiguos sin el campo)
   const matriculas = (todas ?? []).filter((m) => m.activo !== false) as Matricula[];
-  const ids = [...new Set(matriculas.map((m) => m.estudiante_id))];
-  const estudiantes = ids.length
-    ? await bulkGet<Estudiante>('estudiantes', ids)
-    : new Map<string, Estudiante>();
-
-  // Dedup por doc: pueden existir matrículas duplicadas heredadas
-  const docVistos = new Set<string>();
-  return matriculas
-    .map((m) => ({ matricula: m, estudiante: estudiantes.get(m.estudiante_id) }))
-    .filter((x): x is { matricula: Matricula; estudiante: Estudiante } => {
-      if (!x.estudiante) return false;
-      const clave = `${x.estudiante.tipo_doc}-${x.estudiante.doc}`;
-      if (docVistos.has(clave)) return false;
-      docVistos.add(clave);
-      return true;
-    })
-    .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+  return agruparPorDocEligiendoMejor(matriculas);
 }
 
 export async function getEstudiantesRetiradosPorGrupo(grupoId: string, anio: number) {
@@ -45,22 +29,87 @@ export async function getEstudiantesRetiradosPorGrupo(grupoId: string, anio: num
     .from('matriculas').select('*').eq('grupo_id', grupoId).eq('anio', anio);
   if (error) throw new Error(error.message);
   const matriculas = (todas ?? []).filter((m) => m.activo === false) as Matricula[];
-  const ids = [...new Set(matriculas.map((m) => m.estudiante_id))];
-  const estudiantes = ids.length
-    ? await bulkGet<Estudiante>('estudiantes', ids)
+  return agruparPorDocEligiendoMejor(matriculas);
+}
+
+// ── Dedup por documento ─────────────────────────────────────
+// Pueden existir varias matrículas para el mismo estudiante (heredadas
+// de siembras repetidas en distintos dispositivos). Antes se tomaba la
+// "primera" en aparecer, lo cual con Supabase (sin el orden estable que
+// daba la copia local) podía elegir al azar una copia vacía en vez de
+// la que tiene las notas/asistencia reales. Ahora, cuando hay más de
+// una matrícula para el mismo documento, se consulta cuál tiene datos
+// reales (asistencia registrada, o notas/calificaciones con contenido)
+// y se elige esa.
+async function agruparPorDocEligiendoMejor(
+  matriculas: Matricula[],
+): Promise<{ matricula: Matricula; estudiante: Estudiante }[]> {
+  const idsEst = [...new Set(matriculas.map((m) => m.estudiante_id))];
+  const estudiantes = idsEst.length
+    ? await bulkGet<Estudiante>('estudiantes', idsEst)
     : new Map<string, Estudiante>();
 
-  const docVistos = new Set<string>();
-  return matriculas
-    .map((m) => ({ matricula: m, estudiante: estudiantes.get(m.estudiante_id) }))
-    .filter((x): x is { matricula: Matricula; estudiante: Estudiante } => {
-      if (!x.estudiante) return false;
-      const clave = `${x.estudiante.tipo_doc}-${x.estudiante.doc}`;
-      if (docVistos.has(clave)) return false;
-      docVistos.add(clave);
-      return true;
-    })
-    .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+  const porDoc = new Map<string, { matricula: Matricula; estudiante: Estudiante }[]>();
+  for (const m of matriculas) {
+    const est = estudiantes.get(m.estudiante_id);
+    if (!est) continue;
+    const clave = `${est.tipo_doc}-${est.doc}`;
+    if (!porDoc.has(clave)) porDoc.set(clave, []);
+    porDoc.get(clave)!.push({ matricula: m, estudiante: est });
+  }
+
+  const idsAmbiguos = [...porDoc.values()]
+    .filter((grupo) => grupo.length > 1)
+    .flatMap((grupo) => grupo.map((g) => g.matricula.id));
+  const senial = idsAmbiguos.length > 0 ? await calcularSenialMatriculas(idsAmbiguos) : new Map<string, number>();
+
+  const resultado: { matricula: Matricula; estudiante: Estudiante }[] = [];
+  for (const grupo of porDoc.values()) {
+    if (grupo.length === 1) { resultado.push(grupo[0]); continue; }
+    const mejor = [...grupo].sort(
+      (a, b) => (senial.get(b.matricula.id) ?? 0) - (senial.get(a.matricula.id) ?? 0),
+    )[0];
+    resultado.push(mejor);
+  }
+
+  return resultado.sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+}
+
+/** Cuenta señales de "datos reales" por matrícula: asistencia registrada,
+ *  notas cognitivas cargadas, o campos de calificación distintos del default. */
+async function calcularSenialMatriculas(matriculaIds: string[]): Promise<Map<string, number>> {
+  const senial = new Map<string, number>();
+  for (const id of matriculaIds) senial.set(id, 0);
+
+  const { data: asis, error: e1 } = await client()
+    .from('registros_asistencia').select('matricula_id').in('matricula_id', matriculaIds);
+  if (e1) throw new Error(e1.message);
+  for (const a of asis ?? []) senial.set(a.matricula_id, (senial.get(a.matricula_id) ?? 0) + 1);
+
+  const { data: cals, error: e2 } = await client()
+    .from('calificaciones').select('id, matricula_id, nota_final, prueba_institucional')
+    .in('matricula_id', matriculaIds);
+  if (e2) throw new Error(e2.message);
+  for (const c of cals ?? []) {
+    if (c.nota_final != null || c.prueba_institucional != null) {
+      senial.set(c.matricula_id, (senial.get(c.matricula_id) ?? 0) + 1);
+    }
+  }
+
+  const califIds = (cals ?? []).map((c) => c.id);
+  if (califIds.length > 0) {
+    const { data: notas, error: e3 } = await client()
+      .from('notas_cognitivas').select('calificacion_id')
+      .in('calificacion_id', califIds).not('actividad_id', 'is', null);
+    if (e3) throw new Error(e3.message);
+    const califAMatricula = new Map((cals ?? []).map((c) => [c.id, c.matricula_id]));
+    for (const n of notas ?? []) {
+      const matId = califAMatricula.get(n.calificacion_id);
+      if (matId) senial.set(matId, (senial.get(matId) ?? 0) + 1);
+    }
+  }
+
+  return senial;
 }
 
 /** Trae varias filas por id en una sola consulta y las devuelve indexadas por id. */
