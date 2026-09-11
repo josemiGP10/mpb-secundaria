@@ -22,7 +22,12 @@ export class SecundariaDB extends Dexie {
   registros_clase!:        EntityTable<RegistroClase,      'id'>;
 
   constructor() {
-    super('DiarioPedagogico_v1');
+    // v2: nombre nuevo a propósito. Cualquier navegador que ya tuviera datos
+    // locales de antes de volver a modo local (de cuando la app usaba
+    // Supabase directo, sin copia local) arranca con una base vacía bajo
+    // este nombre y por lo tanto SIEMPRE importa la información fresca de
+    // Supabase una vez, en vez de arriesgarse a mostrar datos viejos.
+    super('DiarioPedagogico_v2');
 
     this.version(1).stores({
       areas:               'id, nombre',
