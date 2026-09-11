@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { sembrarDatos } from './db/seed';
-import { sincronizarCompleto, sincronizarBajada, getUltimaSync } from './db/syncService';
+import { importarDesdeSupabase, respaldarASupabase, getUltimoRespaldo } from './db/syncService';
 import { CalificacionesView } from './modules/calificaciones/CalificacionesView';
 import { AsistenciaView } from './modules/asistencia/AsistenciaView';
 import { SecuenciasView } from './modules/secuencias/SecuenciasView';
@@ -18,40 +17,38 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function App() {
-  const [screen,        setScreen]        = useState<Screen>('home');
-  const [dbReady,       setDbReady]       = useState(false);
-  const [sincronizando, setSincronizando] = useState(false);
-  const [enLinea,       setEnLinea]       = useState(navigator.onLine);
-  const [ultimaSync,    setUltimaSync]    = useState<string | null>(getUltimaSync);
-  const [syncError,     setSyncError]     = useState(false);
-  const [syncErrorMsg,  setSyncErrorMsg]  = useState<string>('');
+  const [screen,          setScreen]          = useState<Screen>('home');
+  const [dbReady,         setDbReady]         = useState(false);
+  const [importando,      setImportando]      = useState(false);
+  const [respaldando,     setRespaldando]     = useState(false);
+  const [enLinea,         setEnLinea]         = useState(navigator.onLine);
+  const [ultimoRespaldo,  setUltimoRespaldo]  = useState<string | null>(getUltimoRespaldo);
+  const [importError,     setImportError]     = useState<string | null>(null);
+  const [respaldoError,   setRespaldoError]   = useState<string | null>(null);
 
-  const registrarError = (res: { ok: boolean; errores: string[] } | null, err?: unknown) => {
-    setSyncError(true);
-    const msg = res?.errores?.join(' | ') ?? String(err ?? 'Error desconocido');
-    setSyncErrorMsg(msg);
-    console.error('[SYNC ERROR]', msg);
-  };
-
-  // ── Inicialización: seed + primera bajada si no hay datos ─
+  // ── Inicialización: importar de Supabase SOLO si este equipo no
+  //    tiene datos locales todavía (primera vez). Después de eso, la
+  //    app trabaja 100% local, sin depender de internet para nada.
   useEffect(() => {
     const init = async () => {
-      // Detectar "dispositivo nuevo" ANTES de sembrar: sembrarDatos() ya crea
-      // los grupos localmente, así que revisar el conteo después siempre daba
-      // >0 y esta bajada inicial nunca se ejecutaba.
       const { db } = await import('./db/database');
-      const eraDispositivoNuevo = (await db.grupos.count()) === 0;
+      const tieneDatos = (await db.grupos.count()) > 0;
 
-      await sembrarDatos();
-
-      if (eraDispositivoNuevo && navigator.onLine) {
-        setSincronizando(true);
+      if (!tieneDatos) {
+        if (!navigator.onLine) {
+          setImportError('Este equipo no tiene datos todavía y no hay internet. Conéctese una vez para traer la información inicial.');
+          setDbReady(true);
+          return;
+        }
+        setImportando(true);
         try {
-          const res = await sincronizarBajada();
-          if (res.ok) setUltimaSync(res.ts);
-          else registrarError(res);
-        } catch (e) { registrarError(null, e); }
-        finally { setSincronizando(false); }
+          const res = await importarDesdeSupabase();
+          if (!res.ok) setImportError(res.errores.join(' | '));
+        } catch (e) {
+          setImportError(String(e));
+        } finally {
+          setImportando(false);
+        }
       }
 
       setDbReady(true);
@@ -59,76 +56,35 @@ export function App() {
     init().catch(console.error);
   }, []);
 
-  // ── Auto-sync: al reconectar, al volver al tab, y cada 2 min ─
+  // Solo para mostrar el indicador de conexión (ya no dispara nada automático)
   useEffect(() => {
-    let autoTimer: ReturnType<typeof setInterval>;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    let syncRunning = false;
-
-    const doSync = async () => {
-      if (syncRunning || !navigator.onLine) return;
-      syncRunning = true;
-      setSincronizando(true);
-      setSyncError(false);
-      setSyncErrorMsg('');
-      try {
-        const res = await sincronizarCompleto();
-        if (res.ok) setUltimaSync(res.ts);
-        else registrarError(res);
-      } catch (e) { registrarError(null, e); }
-      finally { setSincronizando(false); syncRunning = false; }
-    };
-
-    const handleOnline = () => {
-      setEnLinea(true);
-      clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(doSync, 2000);
-    };
-
-    const handleOffline = () => {
-      setEnLinea(false);
-      clearTimeout(reconnectTimer);
-    };
-
-    // Sincronizar al volver al app (cambio de pestaña o desbloqueo)
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
-        doSync();
-      }
-    };
-
-    // Auto-sync cada 2 minutos si hay conexión
-    autoTimer = setInterval(() => {
-      if (navigator.onLine) doSync();
-    }, 2 * 60 * 1000);
-
+    const handleOnline  = () => setEnLinea(true);
+    const handleOffline = () => setEnLinea(false);
     window.addEventListener('online',  handleOnline);
     window.addEventListener('offline', handleOffline);
-    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('online',  handleOnline);
       window.removeEventListener('offline', handleOffline);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      clearTimeout(reconnectTimer);
-      clearInterval(autoTimer);
     };
   }, []);
 
-  // ── Sync manual ───────────────────────────────────────────
-  const handleSyncManual = async () => {
-    if (sincronizando || !enLinea) return;
-    setSincronizando(true);
-    setSyncError(false);
-    setSyncErrorMsg('');
+  // ── Respaldo manual ─────────────────────────────────────────
+  const handleRespaldar = async () => {
+    if (respaldando || !enLinea) return;
+    setRespaldando(true);
+    setRespaldoError(null);
     try {
-      const res = await sincronizarCompleto();
-      if (res.ok) setUltimaSync(res.ts);
-      else registrarError(res);
-    } catch (e) { registrarError(null, e); }
-    finally { setSincronizando(false); }
+      const res = await respaldarASupabase();
+      if (res.ok) setUltimoRespaldo(res.ts);
+      else setRespaldoError(res.errores.join(' | '));
+    } catch (e) {
+      setRespaldoError(String(e));
+    } finally {
+      setRespaldando(false);
+    }
   };
 
-  // ── Pantalla de carga ─────────────────────────────────────
+  // ── Pantalla de carga / importación inicial ────────────────
   if (!dbReady) {
     return (
       <div className="flex items-center justify-center bg-surface" style={{ height: '100dvh' }}>
@@ -137,8 +93,25 @@ export function App() {
                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           <div className="w-10 h-10 rounded-full border-4 border-slate-300 border-t-blue-500 animate-spin" />
           <p className="text-slate-500 text-sm">
-            {sincronizando ? '☁ Descargando datos...' : 'Iniciando...'}
+            {importando ? '☁ Trayendo datos iniciales (solo la primera vez)...' : 'Iniciando...'}
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (importError) {
+    return (
+      <div className="flex items-center justify-center bg-surface p-6 text-center" style={{ height: '100dvh' }}>
+        <div className="max-w-xs flex flex-col gap-3">
+          <p className="text-sm text-red-600 font-semibold">No se pudo traer la información inicial</p>
+          <p className="text-xs text-slate-500">{importError}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold"
+          >
+            Reintentar
+          </button>
         </div>
       </div>
     );
@@ -160,33 +133,30 @@ export function App() {
           </p>
         </div>
 
-        {/* Indicador de sync */}
-        <button
-          disabled={sincronizando || !enLinea}
-          title={syncError ? syncErrorMsg || 'Error al sincronizar' : enLinea ? 'Sincronizar ahora' : 'Sin conexión'}
-          onClick={() => syncError ? alert(`Error de sync:\n\n${syncErrorMsg}`) : handleSyncManual()}
-          className="flex items-center gap-1.5 flex-shrink-0 px-2 py-1 rounded-lg transition-colors disabled:opacity-60"
+        {/* Indicador de conexión (informativo, no dispara nada) */}
+        <div
+          title={enLinea ? 'En línea' : 'Sin conexión a internet'}
+          className="flex items-center gap-1.5 flex-shrink-0 px-2 py-1"
         >
-          {sincronizando ? (
-            <span className="w-3 h-3 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
-          ) : syncError ? (
-            <span className="text-red-500 text-sm">⚠</span>
-          ) : enLinea ? (
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          ) : (
-            <span className="w-2 h-2 rounded-full bg-slate-400" />
-          )}
-          <span className={`text-[10px] hidden sm:inline ${
-            syncError ? 'text-red-500' : enLinea ? 'text-emerald-600' : 'text-slate-400'
-          }`}>
-            {sincronizando ? 'Sync...' : syncError ? 'Ver error' : enLinea ? 'En línea' : 'Sin internet'}
+          <span className={`w-2 h-2 rounded-full ${enLinea ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+          <span className={`text-[10px] hidden sm:inline ${enLinea ? 'text-emerald-600' : 'text-slate-400'}`}>
+            {enLinea ? 'En línea' : 'Sin internet'}
           </span>
-        </button>
+        </div>
       </header>
 
       {/* Contenido */}
       <main className="flex-1 overflow-y-auto">
-        {screen === 'home'           && <HomeScreen onNavigate={setScreen} enLinea={enLinea} ultimaSync={ultimaSync} sincronizando={sincronizando} onSync={handleSyncManual} />}
+        {screen === 'home' && (
+          <HomeScreen
+            onNavigate={setScreen}
+            enLinea={enLinea}
+            respaldando={respaldando}
+            ultimoRespaldo={ultimoRespaldo}
+            respaldoError={respaldoError}
+            onRespaldar={handleRespaldar}
+          />
+        )}
         {screen === 'asistencia'     && <AsistenciaView />}
         {screen === 'calificaciones' && <CalificacionesView />}
         {screen === 'secuencias'     && <SecuenciasView />}
@@ -223,13 +193,14 @@ export function App() {
 // ── Home screen ───────────────────────────────────────────────
 
 function HomeScreen({
-  onNavigate, enLinea, ultimaSync, sincronizando, onSync,
+  onNavigate, enLinea, respaldando, ultimoRespaldo, respaldoError, onRespaldar,
 }: {
   onNavigate: (s: Screen) => void;
   enLinea: boolean;
-  ultimaSync: string | null;
-  sincronizando: boolean;
-  onSync: () => void;
+  respaldando: boolean;
+  ultimoRespaldo: string | null;
+  respaldoError: string | null;
+  onRespaldar: () => void;
 }) {
   return (
     <div className="p-6 flex flex-col gap-6">
@@ -252,40 +223,29 @@ function HomeScreen({
           onClick={() => onNavigate('secuencias')} />
       </div>
 
-      {/* Estado de sincronización */}
-      {sincronizando ? (
-        <div className="rounded-xl bg-violet-50 border border-violet-200 p-4 text-sm text-violet-700 flex items-center gap-3">
-          <span className="w-4 h-4 rounded-full border-2 border-violet-500 border-t-transparent animate-spin flex-shrink-0" />
-          <div>
-            <p className="font-semibold">Sincronizando con la nube…</p>
-            <p className="text-violet-500 text-xs mt-0.5">Sus datos se están guardando en Supabase</p>
-          </div>
+      {/* Respaldo manual */}
+      <div className="rounded-xl bg-slate-100 border border-slate-300 p-4 text-sm text-slate-700">
+        <div className="flex items-center justify-between gap-2 mb-0.5">
+          <p className="font-semibold">💾 Todo funciona local en este equipo</p>
+          <button
+            onClick={onRespaldar}
+            disabled={respaldando || !enLinea}
+            title={enLinea ? 'Subir una copia de seguridad a la nube' : 'Necesita internet para respaldar'}
+            className="text-[10px] px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors disabled:opacity-40 flex-shrink-0"
+          >
+            {respaldando ? 'Respaldando...' : 'Respaldar ahora'}
+          </button>
         </div>
-      ) : enLinea ? (
-        <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-700">
-          <div className="flex items-center justify-between mb-0.5">
-            <p className="font-semibold">☁ Conectado — datos sincronizados</p>
-            <button onClick={onSync}
-              className="text-[10px] px-2 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-700 transition-colors">
-              Sync manual
-            </button>
-          </div>
-          <p className="text-emerald-600 text-xs">
-            {ultimaSync
-              ? `Última sync: ${new Date(ultimaSync).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-              : 'Toque "Sync manual" para subir sus datos ahora'}
-          </p>
-        </div>
-      ) : (
-        <div className="rounded-xl bg-slate-100 border border-slate-300 p-4 text-sm text-slate-600">
-          <p className="font-semibold mb-0.5 text-slate-700">Sin conexión — modo offline</p>
-          <p className="text-slate-500 text-xs">
-            {ultimaSync
-              ? `Última sync: ${new Date(ultimaSync).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })} · Al recuperar señal sincronizará automáticamente`
-              : 'Al conectarse a internet se sincronizará automáticamente'}
-          </p>
-        </div>
-      )}
+        <p className="text-slate-500 text-xs">
+          {respaldoError
+            ? `Error al respaldar: ${respaldoError}`
+            : ultimoRespaldo
+              ? `Último respaldo: ${new Date(ultimoRespaldo).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+              : enLinea
+                ? 'Toque "Respaldar ahora" para guardar una copia en la nube.'
+                : 'Sin internet ahora — conéctese cuando pueda y toque "Respaldar ahora".'}
+        </p>
+      </div>
     </div>
   );
 }

@@ -51,40 +51,86 @@ export async function getEstudiantesPorGrupo(grupoId: string, anio: number) {
     .where('[grupo_id+anio]').equals([grupoId, anio]).toArray();
   // Solo activos (activo !== false cubre registros antiguos sin el campo)
   const matriculas = todas.filter(m => m.activo !== false);
-  const ids = matriculas.map((m) => m.estudiante_id);
-  const estudiantes = await db.estudiantes.bulkGet(ids);
-
-  // Dedup por doc: varios dispositivos sembraron IDs distintos para el mismo estudiante
-  const docVistos = new Set<string>();
-  return matriculas
-    .map((m, i) => ({ matricula: m, estudiante: estudiantes[i]! }))
-    .filter(({ estudiante }) => {
-      if (!estudiante) return false;
-      const clave = `${estudiante.tipo_doc}-${estudiante.doc}`;
-      if (docVistos.has(clave)) return false;
-      docVistos.add(clave);
-      return true;
-    })
-    .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+  return agruparPorDocEligiendoMejor(matriculas);
 }
 
 export async function getEstudiantesRetiradosPorGrupo(grupoId: string, anio: number) {
   const todas = await db.matriculas
     .where('[grupo_id+anio]').equals([grupoId, anio]).toArray();
   const matriculas = todas.filter(m => m.activo === false);
-  const ids = matriculas.map(m => m.estudiante_id);
-  const estudiantes = await db.estudiantes.bulkGet(ids);
-  const docVistos = new Set<string>();
-  return matriculas
-    .map((m, i) => ({ matricula: m, estudiante: estudiantes[i]! }))
-    .filter(({ estudiante }) => {
-      if (!estudiante) return false;
-      const clave = `${estudiante.tipo_doc}-${estudiante.doc}`;
-      if (docVistos.has(clave)) return false;
-      docVistos.add(clave);
-      return true;
-    })
-    .sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+  return agruparPorDocEligiendoMejor(matriculas);
+}
+
+// ── Dedup por documento ─────────────────────────────────────
+// Pueden existir varias matrículas para el mismo estudiante (heredadas
+// de siembras repetidas en distintos dispositivos, aún sin limpiar del
+// todo en Supabase). Antes se tomaba "la primera" en aparecer, lo cual
+// dependía del orden de iteración de IndexedDB y podía mostrar una
+// copia vacía en vez de la que tiene las notas/asistencia reales.
+// Cuando hay más de una matrícula para el mismo documento, se consulta
+// cuál tiene señales de datos reales y se elige esa.
+async function agruparPorDocEligiendoMejor(
+  matriculas: Matricula[],
+): Promise<{ matricula: Matricula; estudiante: Estudiante }[]> {
+  const ids = matriculas.map((m) => m.estudiante_id);
+  const estudiantesRaw = await db.estudiantes.bulkGet(ids);
+
+  const porDoc = new Map<string, { matricula: Matricula; estudiante: Estudiante }[]>();
+  matriculas.forEach((m, i) => {
+    const est = estudiantesRaw[i];
+    if (!est) return;
+    const clave = `${est.tipo_doc}-${est.doc}`;
+    if (!porDoc.has(clave)) porDoc.set(clave, []);
+    porDoc.get(clave)!.push({ matricula: m, estudiante: est });
+  });
+
+  const idsAmbiguos = [...porDoc.values()]
+    .filter((grupo) => grupo.length > 1)
+    .flatMap((grupo) => grupo.map((g) => g.matricula.id));
+  const senial = idsAmbiguos.length > 0 ? await calcularSenialMatriculas(idsAmbiguos) : new Map<string, number>();
+
+  const resultado: { matricula: Matricula; estudiante: Estudiante }[] = [];
+  for (const grupo of porDoc.values()) {
+    if (grupo.length === 1) { resultado.push(grupo[0]); continue; }
+    const mejor = [...grupo].sort(
+      (a, b) => (senial.get(b.matricula.id) ?? 0) - (senial.get(a.matricula.id) ?? 0),
+    )[0];
+    resultado.push(mejor);
+  }
+
+  return resultado.sort((a, b) => a.estudiante.apellido1.localeCompare(b.estudiante.apellido1, 'es'));
+}
+
+/** Cuenta señales de "datos reales" por matrícula: asistencia registrada,
+ *  notas cognitivas cargadas, o campos de calificación distintos del default. */
+async function calcularSenialMatriculas(matriculaIds: string[]): Promise<Map<string, number>> {
+  const senial = new Map<string, number>();
+  for (const id of matriculaIds) senial.set(id, 0);
+
+  const asis = await db.registros_asistencia.where('matricula_id').anyOf(matriculaIds).toArray();
+  for (const a of asis) senial.set(a.matricula_id, (senial.get(a.matricula_id) ?? 0) + 1);
+
+  const cals = await db.calificaciones.where('matricula_id').anyOf(matriculaIds).toArray();
+  for (const c of cals) {
+    if (c.nota_final != null || c.prueba_institucional != null) {
+      senial.set(c.matricula_id, (senial.get(c.matricula_id) ?? 0) + 1);
+    }
+  }
+
+  const califIds = cals.map((c) => c.id);
+  if (califIds.length > 0) {
+    const notas = await db.notas_cognitivas
+      .where('calificacion_id').anyOf(califIds)
+      .filter((n) => !!n.actividad_id)
+      .toArray();
+    const califAMatricula = new Map(cals.map((c) => [c.id, c.matricula_id]));
+    for (const n of notas) {
+      const matId = califAMatricula.get(n.calificacion_id);
+      if (matId) senial.set(matId, (senial.get(matId) ?? 0) + 1);
+    }
+  }
+
+  return senial;
 }
 
 // Notifica a otros módulos (Notas, etc.) que el listado de estudiantes cambió

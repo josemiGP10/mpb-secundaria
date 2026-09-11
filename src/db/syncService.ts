@@ -1,13 +1,16 @@
 // ============================================================
-//  Sincronización local ↔ Supabase — Diario Pedagógico MPB
-//  Estrategia simple: subida y bajada completa siempre.
-//  El upsert es idempotente — datos ya existentes se confirman rápido.
+//  Respaldo con Supabase — Diario Pedagógico MPB
+//  La app funciona 100% local (IndexedDB) en este equipo. Supabase
+//  solo se usa para: (a) importar una vez al arrancar en un equipo
+//  sin datos locales, y (b) respaldar manualmente cuando el docente
+//  lo pida, con buena conexión. Sin sincronización automática ni
+//  periódica — un solo equipo, un solo dueño de los datos: local.
 // ============================================================
 
 import { supabase } from '@/lib/supabase';
 import { db } from './database';
 
-const SYNC_TS_KEY = 'mpb_sec_last_sync';
+const BACKUP_TS_KEY = 'mpb_sec_last_backup';
 const BATCH = 400;
 
 // ── Resultado ──────────────────────────────────────────────
@@ -48,39 +51,54 @@ async function bajarTabla(tabla: string): Promise<unknown[]> {
   return todas;
 }
 
-// Merge last-write-wins por updated_at: solo sobreescribe si el registro remoto
-// es más nuevo que el local. Así un retiro/cambio local no se pisa en la bajada.
-async function mergeConUpdatedAt(
-  tabla: { bulkGet: (ids: string[]) => Promise<(Record<string, unknown> | undefined)[]>; bulkPut: (rows: Record<string, unknown>[]) => Promise<unknown> },
-  remoteRows: Record<string, unknown>[],
-): Promise<void> {
-  if (remoteRows.length === 0) return;
-  const ids = remoteRows.map(r => r.id as string);
-  const locales = await tabla.bulkGet(ids);
-  const aPoner: Record<string, unknown>[] = [];
-  for (let i = 0; i < remoteRows.length; i++) {
-    const remote = remoteRows[i];
-    const local  = locales[i];
-    if (!local) {
-      aPoner.push(remote);
-    } else {
-      const tsLocal  = (local.updated_at  as string) ?? '';
-      const tsRemote = (remote.updated_at as string) ?? '';
-      if (tsRemote >= tsLocal) aPoner.push(remote);
+export function getUltimoRespaldo(): string | null {
+  return localStorage.getItem(BACKUP_TS_KEY);
+}
+
+// ══════════════════════════════════════════════════════════
+//  IMPORTAR: Supabase → local. Solo se llama una vez, cuando
+//  este equipo arranca sin datos locales todavía.
+// ══════════════════════════════════════════════════════════
+
+export async function importarDesdeSupabase(): Promise<SyncResult> {
+  if (!supabase) return NO_CONFIG;
+  const errores: string[] = [];
+  let total = 0;
+
+  const pasos: [string, (rows: unknown[]) => Promise<unknown>][] = [
+    ['areas',                  (r) => db.areas.bulkPut(r as never)],
+    ['asignaturas',            (r) => db.asignaturas.bulkPut(r as never)],
+    ['grupos',                 (r) => db.grupos.bulkPut(r as never)],
+    ['grupo_asignaturas',      (r) => db.grupo_asignaturas.bulkPut(r as never)],
+    ['estudiantes',            (r) => db.estudiantes.bulkPut(r as never)],
+    ['matriculas',             (r) => db.matriculas.bulkPut(r as never)],
+    ['actividades_cognitivas', (r) => db.actividades_cognitivas.bulkPut(r as never)],
+    ['calificaciones',         (r) => db.calificaciones.bulkPut(r as never)],
+    ['notas_cognitivas',       (r) => db.notas_cognitivas.bulkPut(r as never)],
+    ['registros_asistencia',   (r) => db.registros_asistencia.bulkPut(r as never)],
+    ['secuencias',             (r) => db.secuencias.bulkPut(r as never)],
+    ['sesiones',               (r) => db.sesiones.bulkPut(r as never)],
+    ['registros_clase',        (r) => db.registros_clase.bulkPut(r as never)],
+  ];
+
+  for (const [tabla, putter] of pasos) {
+    try {
+      const rows = await bajarTabla(tabla);
+      await putter(rows);
+      total += rows.length;
+    } catch (e) {
+      errores.push(String(e));
     }
   }
-  if (aPoner.length > 0) await tabla.bulkPut(aPoner as never);
-}
 
-export function getUltimaSync(): string | null {
-  return localStorage.getItem(SYNC_TS_KEY);
+  return { ok: errores.length === 0, total, errores, ts: new Date().toISOString() };
 }
 
 // ══════════════════════════════════════════════════════════
-//  SUBIDA: local → Supabase (completa)
+//  RESPALDAR: local → Supabase. Botón manual "Respaldar ahora".
 // ══════════════════════════════════════════════════════════
 
-export async function sincronizarSubida(): Promise<SyncResult> {
+export async function respaldarASupabase(): Promise<SyncResult> {
   if (!supabase) return NO_CONFIG;
   const errores: string[] = [];
   let total = 0;
@@ -112,76 +130,6 @@ export async function sincronizarSubida(): Promise<SyncResult> {
   }
 
   const ts = new Date().toISOString();
-  if (errores.length === 0) localStorage.setItem(SYNC_TS_KEY, ts);
-  return { ok: errores.length === 0, total, errores, ts };
-}
-
-// ══════════════════════════════════════════════════════════
-//  BAJADA: Supabase → local (completa)
-// ══════════════════════════════════════════════════════════
-
-export async function sincronizarBajada(): Promise<SyncResult> {
-  if (!supabase) return NO_CONFIG;
-  const errores: string[] = [];
-  let total = 0;
-
-  // Tablas con updated_at → merge last-write-wins (evita pisar cambios locales más nuevos)
-  // Tablas sin updated_at (solo created_at) → bulkPut directo (son registros de solo inserción)
-  const pasos: [string, (r: unknown[]) => Promise<void>][] = [
-    ['areas',                  async (r) => { await mergeConUpdatedAt(db.areas         as never, r as never); }],
-    ['asignaturas',            async (r) => { await mergeConUpdatedAt(db.asignaturas   as never, r as never); }],
-    ['grupos',                 async (r) => { await mergeConUpdatedAt(db.grupos        as never, r as never); }],
-    ['grupo_asignaturas',      async (r) => { await mergeConUpdatedAt(db.grupo_asignaturas as never, r as never); }],
-    ['estudiantes',            async (r) => { await mergeConUpdatedAt(db.estudiantes   as never, r as never); }],
-    ['matriculas',             async (r) => { await mergeConUpdatedAt(db.matriculas    as never, r as never); }],
-    ['actividades_cognitivas', async (r) => { await mergeConUpdatedAt(db.actividades_cognitivas as never, r as never); }],
-    ['calificaciones',         async (r) => { await mergeConUpdatedAt(db.calificaciones as never, r as never); }],
-    ['notas_cognitivas',       async (r) => { await db.notas_cognitivas.bulkPut(r as never); }],
-    ['registros_asistencia',   async (r) => { await db.registros_asistencia.bulkPut(r as never); }],
-    ['secuencias',             async (r) => { await mergeConUpdatedAt(db.secuencias   as never, r as never); }],
-    ['sesiones',               async (r) => { await mergeConUpdatedAt(db.sesiones     as never, r as never); }],
-    ['registros_clase',        async (r) => { await mergeConUpdatedAt(db.registros_clase as never, r as never); }],
-  ];
-
-  for (const [tabla, putter] of pasos) {
-    try {
-      const rows = await bajarTabla(tabla);
-      await putter(rows);
-      total += rows.length;
-    } catch (e) {
-      errores.push(String(e));
-    }
-  }
-
-  const ts = new Date().toISOString();
-  if (errores.length === 0) localStorage.setItem(SYNC_TS_KEY, ts);
-  return { ok: errores.length === 0, total, errores, ts };
-}
-
-// ══════════════════════════════════════════════════════════
-//  SYNC COMPLETO: BAJAR primero, luego SUBIR
-//
-//  Orden importa: si iPhone guardó 7.5 y PC tiene 5.0 por defecto,
-//  bajar primero trae el 7.5 al PC; luego el PC sube el 7.5.
-//  Si se subiera primero, el PC pisaría el 7.5 con su 5.0.
-// ══════════════════════════════════════════════════════════
-
-export async function sincronizarCompleto(): Promise<SyncResult> {
-  if (!supabase) return NO_CONFIG;
-  const errores: string[] = [];
-  let total = 0;
-
-  // 1. Bajar primero: local queda con lo más reciente de Supabase
-  const bajada = await sincronizarBajada();
-  total += bajada.total;
-  errores.push(...bajada.errores);
-
-  // 2. Subir después: ya tenemos los datos correctos en local
-  const subida = await sincronizarSubida();
-  total += subida.total;
-  errores.push(...subida.errores);
-
-  const ts = new Date().toISOString();
-  if (errores.length === 0) localStorage.setItem(SYNC_TS_KEY, ts);
+  if (errores.length === 0) localStorage.setItem(BACKUP_TS_KEY, ts);
   return { ok: errores.length === 0, total, errores, ts };
 }
