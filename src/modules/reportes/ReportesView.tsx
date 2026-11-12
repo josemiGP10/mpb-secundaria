@@ -11,7 +11,7 @@ function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T
   );
 }
 
-type TipoReporte = 'notas' | 'asistencia' | 'salones';
+type TipoReporte = 'notas' | 'asistencia' | 'salones' | 'matricula';
 
 // ── CSS del reporte imprimible ──────────────────────────────
 const PRINT_CSS = `
@@ -301,6 +301,129 @@ function imprimirSalones(salones: Salones, tituloExamen: string, anio: number): 
   abrirVentana(`Distribución ${tituloExamen}`, bloques, SALON_CSS);
 }
 
+// ── Reporte de matrícula: activos y retirados por grado ─────
+
+type ParEst = Awaited<ReturnType<typeof getEstudiantesPorGrupo>>[number];
+interface MatriculaGrupo { grupo: Grupo; activos: ParEst[]; retirados: ParEst[] }
+
+const claveDoc = (p: ParEst) => `${p.estudiante.tipo_doc}-${p.estudiante.doc}`;
+const nombreCompleto = (p: ParEst) => {
+  const e = p.estudiante;
+  return [e.apellido1, e.apellido2, e.nombre1, e.nombre2].filter(Boolean).join(' ');
+};
+
+async function cargarMatriculaPorGrupo(grupos: Grupo[], anio: number): Promise<MatriculaGrupo[]> {
+  return Promise.all(sortGrupos(grupos).map(async grupo => {
+    const [act, ret] = await Promise.all([
+      getEstudiantesPorGrupo(grupo.id, anio),
+      getEstudiantesRetiradosPorGrupo(grupo.id, anio),
+    ]);
+    // Mismo criterio que el resto de la app: si hay duplicados y uno está
+    // retirado, la versión retirada tiene precedencia.
+    const retKeys = new Set(ret.map(claveDoc));
+    return { grupo, activos: act.filter(p => !retKeys.has(claveDoc(p))), retirados: ret };
+  }));
+}
+
+function imprimirMatricula(datos: MatriculaGrupo[], anio: number): void {
+  const totA = datos.reduce((s, d) => s + d.activos.length, 0);
+  const totR = datos.reduce((s, d) => s + d.retirados.length, 0);
+
+  const resumen = `
+    <table>
+      <thead><tr><th>Grado</th><th class="c">Activos</th><th class="c">Retirados</th><th class="c">Total</th></tr></thead>
+      <tbody>
+        ${datos.map(d => `
+          <tr><td>${d.grupo.nombre}</td>
+          <td class="c">${d.activos.length}</td>
+          <td class="c rojo">${d.retirados.length}</td>
+          <td class="c">${d.activos.length + d.retirados.length}</td></tr>`).join('')}
+        <tr><th style="text-align:left">TOTAL</th><th>${totA}</th><th>${totR}</th><th>${totA + totR}</th></tr>
+      </tbody>
+    </table>`;
+
+  const detalle = datos.map(d => `
+    <h3 style="margin:16px 0 4px;font-size:11px;">${d.grupo.nombre} — ${d.activos.length} activos · ${d.retirados.length} retirados</h3>
+    <table>
+      <thead><tr><th class="num">#</th><th class="nombre">Estudiante</th><th>Documento</th><th class="c">Estado</th><th>Observación</th></tr></thead>
+      <tbody>
+        ${[...d.activos.map(p => ({ p, ret: false })), ...d.retirados.map(p => ({ p, ret: true }))]
+          .map(({ p, ret }, i) => `
+            <tr><td class="num">${i + 1}</td>
+            <td class="nombre">${nombreCompleto(p)}</td>
+            <td>${p.estudiante.tipo_doc} ${p.estudiante.doc}</td>
+            <td class="c ${ret ? 'rojo' : 'verde'}">${ret ? 'Retirado' : 'Activo'}</td>
+            <td>${ret ? (p.matricula.retiro_observaciones ?? '') : ''}</td></tr>`).join('')}
+      </tbody>
+    </table>`).join('');
+
+  abrirVentana(
+    `Matrícula ${anio}`,
+    reportEncabezado('Estudiantes activos y retirados por grado', `Año lectivo ${anio}`) +
+      resumen + detalle +
+      `<div class="footer"><span>Total activos: ${totA} · Total retirados: ${totR}</span><span>Diario Pedagógico MPB</span></div>`,
+  );
+}
+
+// ── Totalizado institucional (sin separar por grado) ────────
+// Un estudiante puede tener matrícula en dos grupos (p. ej. pasó de un grado
+// regular a MEF, con documento "123_mef"). Aquí se cuenta una sola vez:
+// si está activo en algún grupo cuenta como activo; si no, como retirado.
+
+interface FilaTotal { par: ParEst; activo: boolean; grupo: string; obs: string }
+
+function totalizarMatricula(datos: MatriculaGrupo[]): FilaTotal[] {
+  const norm = (p: ParEst) => `${p.estudiante.tipo_doc}-${p.estudiante.doc.replace(/_mef$/i, '')}`;
+  const mapa = new Map<string, FilaTotal>();
+  for (const d of datos) {
+    for (const p of d.activos) {
+      const k = norm(p);
+      const prev = mapa.get(k);
+      if (!prev || !prev.activo) mapa.set(k, { par: p, activo: true, grupo: d.grupo.nombre, obs: '' });
+    }
+    for (const p of d.retirados) {
+      const k = norm(p);
+      if (!mapa.has(k)) mapa.set(k, { par: p, activo: false, grupo: d.grupo.nombre, obs: p.matricula.retiro_observaciones ?? '' });
+    }
+  }
+  return [...mapa.values()].sort((a, b) => nombreCompleto(a.par).localeCompare(nombreCompleto(b.par), 'es'));
+}
+
+function imprimirMatriculaTotalizado(datos: MatriculaGrupo[], anio: number): void {
+  const filas = totalizarMatricula(datos);
+  const act = filas.filter(f => f.activo);
+  const ret = filas.filter(f => !f.activo);
+
+  const caja = (label: string, n: number, color: string) =>
+    `<div style="flex:1;border:1px solid #aaa;border-radius:6px;padding:10px;text-align:center;">
+       <div style="font-size:9px;color:#666;text-transform:uppercase;">${label}</div>
+       <div style="font-size:24px;font-weight:bold;color:${color};">${n}</div></div>`;
+
+  const lista = (titulo: string, fs: FilaTotal[], conObs: boolean) => `
+    <h3 style="margin:16px 0 4px;font-size:11px;">${titulo} (${fs.length})</h3>
+    <table>
+      <thead><tr><th class="num">#</th><th class="nombre">Estudiante</th><th>Documento</th><th class="c">Grado</th>${conObs ? '<th>Observación</th>' : ''}</tr></thead>
+      <tbody>${fs.map((f, i) => `
+        <tr><td class="num">${i + 1}</td><td class="nombre">${nombreCompleto(f.par)}</td>
+        <td>${f.par.estudiante.tipo_doc} ${f.par.estudiante.doc.replace(/_mef$/i, '')}</td>
+        <td class="c">${f.grupo}</td>${conObs ? `<td>${f.obs}</td>` : ''}</tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  abrirVentana(
+    `Matrícula totalizada ${anio}`,
+    reportEncabezado('Consolidado institucional de matrícula — Secundaria', `Año lectivo ${anio}`, 'Incluye grados regulares y MEF') +
+      `<div style="display:flex;gap:10px;margin:6px 0 4px;">
+         ${caja('Total estudiantes', filas.length, '#111')}
+         ${caja('Activos', act.length, '#166534')}
+         ${caja('Retirados', ret.length, '#991b1b')}
+       </div>` +
+      lista('Estudiantes retirados', ret, true) +
+      lista('Estudiantes activos', act, false) +
+      `<div class="footer"><span>Cada estudiante se cuenta una sola vez aunque tenga matrícula en más de un grupo.</span><span>Diario Pedagógico MPB</span></div>`,
+  );
+}
+
 // ── Componente principal ────────────────────────────────────
 
 export function ReportesView() {
@@ -321,6 +444,11 @@ export function ReportesView() {
   const grupos     = useLiveQuery<Grupo[]>(     () => db.grupos.where('anio').equals(anio).toArray(), [anio]);
   const todasAsigs = useLiveQuery<Asignatura[]>(() => db.asignaturas.toArray(), []);
   const areas      = useLiveQuery<Area[]>(      () => db.areas.toArray(),       []);
+
+  const matriculaDatos = useLiveQuery<MatriculaGrupo[] | undefined>(
+    async () => (tipo === 'matricula' && grupos ? cargarMatriculaPorGrupo(grupos, anio) : undefined),
+    [tipo, grupos, anio],
+  );
 
   const asignaturasGrupo = useLiveQuery<Asignatura[]>(async () => {
     if (!todasAsigs || !grupoId) return [];
@@ -384,7 +512,7 @@ export function ReportesView() {
     <div className="flex flex-col h-full">
       {/* Selectores */}
       <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-surface-muted bg-surface-card flex-shrink-0">
-        {tipo !== 'salones' ? (
+        {tipo === 'matricula' ? null : tipo !== 'salones' ? (
           <div className="flex gap-1.5">
             <select
               value={grupoId}
@@ -432,14 +560,14 @@ export function ReportesView() {
         {/* Tipo + período */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-            {(['notas', 'asistencia', 'salones'] as TipoReporte[]).map(t => (
+            {(['notas', 'asistencia', 'salones', 'matricula'] as TipoReporte[]).map(t => (
               <button
                 key={t}
                 onClick={() => setTipo(t)}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors
                   ${tipo === t ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
               >
-                {t === 'notas' ? '✎ Notas' : t === 'asistencia' ? '✓ Asistencia' : '🎲 Salones'}
+                {t === 'notas' ? '✎ Notas' : t === 'asistencia' ? '✓ Asistencia' : t === 'salones' ? '🎲 Salones' : '👥 Matrícula'}
               </button>
             ))}
           </div>
@@ -463,7 +591,91 @@ export function ReportesView() {
       </div>
 
       {/* Cuerpo */}
-      {tipo !== 'salones' ? (
+      {tipo === 'matricula' ? (
+        <div className="flex-1 flex flex-col items-center gap-4 p-6 text-center overflow-y-auto">
+          <div>
+            <h2 className="text-base font-semibold text-slate-800 mb-1">Activos y retirados por grado</h2>
+            <p className="text-sm text-slate-500 max-w-xs">
+              Conteo desde la base local de este equipo, año {anio}.
+            </p>
+          </div>
+
+          {!matriculaDatos ? (
+            <span className="w-6 h-6 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+          ) : (
+            <>
+              <table className="w-full max-w-sm text-xs text-slate-700 border border-slate-200 rounded-xl overflow-hidden">
+                <thead className="bg-slate-100 text-slate-500 uppercase text-[10px]">
+                  <tr>
+                    <th className="text-left px-3 py-1.5">Grado</th>
+                    <th className="px-2 py-1.5">Activos</th>
+                    <th className="px-2 py-1.5">Retirados</th>
+                    <th className="px-2 py-1.5">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matriculaDatos.map(d => (
+                    <tr key={d.grupo.id} className="border-t border-slate-100">
+                      <td className="text-left px-3 py-1.5 font-medium">{d.grupo.nombre}</td>
+                      <td className="px-2 py-1.5 text-emerald-700 font-semibold">{d.activos.length}</td>
+                      <td className="px-2 py-1.5 text-red-700 font-semibold">{d.retirados.length}</td>
+                      <td className="px-2 py-1.5">{d.activos.length + d.retirados.length}</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-slate-300 bg-slate-50 font-bold">
+                    <td className="text-left px-3 py-1.5">TOTAL</td>
+                    <td className="px-2 py-1.5">{matriculaDatos.reduce((s, d) => s + d.activos.length, 0)}</td>
+                    <td className="px-2 py-1.5">{matriculaDatos.reduce((s, d) => s + d.retirados.length, 0)}</td>
+                    <td className="px-2 py-1.5">{matriculaDatos.reduce((s, d) => s + d.activos.length + d.retirados.length, 0)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {(() => {
+                const tot = totalizarMatricula(matriculaDatos);
+                const a = tot.filter(f => f.activo).length;
+                return (
+                  <div className="w-full max-w-sm grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-slate-200 bg-white py-2">
+                      <p className="text-[10px] text-slate-400 uppercase">Total</p>
+                      <p className="text-xl font-bold text-slate-800">{tot.length}</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 py-2">
+                      <p className="text-[10px] text-emerald-600 uppercase">Activos</p>
+                      <p className="text-xl font-bold text-emerald-700">{a}</p>
+                    </div>
+                    <div className="rounded-xl border border-red-200 bg-red-50 py-2">
+                      <p className="text-[10px] text-red-600 uppercase">Retirados</p>
+                      <p className="text-xl font-bold text-red-700">{tot.length - a}</p>
+                    </div>
+                    <p className="col-span-3 text-[10px] text-slate-400">
+                      Totalizado institucional: cada estudiante cuenta una sola vez aunque esté en dos grupos.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  onClick={() => imprimirMatriculaTotalizado(matriculaDatos, anio)}
+                  className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-blue-600 text-white font-semibold text-sm shadow hover:bg-blue-700 active:scale-95 transition-all"
+                >
+                  <span>🖨</span> Totalizado
+                </button>
+                <button
+                  onClick={() => imprimirMatricula(matriculaDatos, anio)}
+                  className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white border border-blue-600 text-blue-700 font-semibold text-sm shadow hover:bg-blue-50 active:scale-95 transition-all"
+                >
+                  <span>🖨</span> Por grado
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-300 max-w-xs">
+                Totalizado: cifras generales y listado único de retirados y activos. Por grado: resumen y listado de cada grado.
+              </p>
+            </>
+          )}
+        </div>
+      ) : tipo !== 'salones' ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-5 p-6 text-center">
           <div className="text-5xl select-none">🖨</div>
 
