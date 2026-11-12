@@ -370,9 +370,12 @@ function imprimirMatricula(datos: MatriculaGrupo[], anio: number): void {
 // Presente/Ausente para que el director de grupo haga el conteo.
 
 const SIMULACRO_CSS = `
+@page { size: letter portrait; margin: 10mm 12mm; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 11px; }
-.page { padding: 14px 22px; page-break-after: always; }
+.page { page-break-after: always; break-after: page; page-break-inside: avoid; break-inside: avoid; }
+.page:last-child { page-break-after: auto; break-after: auto; }
+@media screen { .page { width: 8.5in; padding: 10mm 12mm; margin: 0 auto 16px; box-shadow: 0 0 4px #aaa; } }
 .hdr { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #b91c1c; padding-bottom: 6px; margin-bottom: 8px; }
 .hdr img { height: 46px; }
 .hdr h1 { font-size: 13px; text-transform: uppercase; }
@@ -384,14 +387,14 @@ body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 11px; 
 .meta span { display: block; border-bottom: 1px solid #999; height: 16px; padding-top: 2px; }
 table { width: 100%; border-collapse: collapse; }
 th { background: #e5e5e5; font-size: 9px; text-transform: uppercase; border: 0.5px solid #888; padding: 4px; }
-td { border: 0.5px solid #888; padding: 3px 5px; height: 20px; }
+td { border: 0.5px solid #888; padding: 0 5px; }
 .n { width: 24px; text-align: center; color: #666; }
 .chk { width: 62px; text-align: center; }
-.box { display: inline-block; width: 13px; height: 13px; border: 1.3px solid #222; border-radius: 2px; }
+.box { display: inline-block; width: 12px; height: 12px; border: 1.3px solid #222; border-radius: 2px; vertical-align: middle; }
 .obs { width: 30%; }
-.tot { display: flex; gap: 18px; margin-top: 10px; font-size: 11px; font-weight: bold; }
+.tot { display: flex; gap: 18px; margin-top: 8px; font-size: 11px; font-weight: bold; }
 .tot span { display: inline-block; min-width: 44px; border-bottom: 1px solid #222; }
-.firma { margin-top: 28px; display: flex; justify-content: space-between; font-size: 9px; color: #444; }
+.firma { margin-top: 22px; display: flex; justify-content: space-between; font-size: 9px; color: #444; }
 .firma div { border-top: 0.5px solid #555; width: 220px; text-align: center; padding-top: 3px; }
 .nota { font-size: 8.5px; color: #666; margin-top: 6px; }
 @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
@@ -399,9 +402,14 @@ td { border: 0.5px solid #888; padding: 3px 5px; height: 20px; }
 
 function imprimirListasSimulacro(datos: MatriculaGrupo[]): void {
   const hoy = new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
-  const filaVacia = `<tr><td class="n">+</td><td></td><td class="chk"><span class="box"></span></td><td class="chk"><span class="box"></span></td><td class="obs"></td></tr>`;
   const paginas = datos.filter(d => d.activos.length > 0).map(d => {
     const lista = [...d.activos].sort((a, b) => nombreCompleto(a).localeCompare(nombreCompleto(b), 'es'));
+    // Alto de fila ajustado para que el grupo completo quepa en una hoja carta
+    // (~600px disponibles para la tabla después de encabezado y firmas).
+    const altoFila = Math.max(14, Math.min(22, Math.floor(600 / (lista.length + 4))));
+    const fs = altoFila < 17 ? 10 : 11;
+    const td = `style="height:${altoFila}px;font-size:${fs}px"`;
+    const filaVacia = `<tr><td class="n" ${td}>+</td><td ${td}></td><td class="chk" ${td}><span class="box"></span></td><td class="chk" ${td}><span class="box"></span></td><td class="obs" ${td}></td></tr>`;
     return `
     <div class="page">
       <div class="hdr"><img src="${LOGO_URL}" alt="" /><div>
@@ -417,7 +425,7 @@ function imprimirListasSimulacro(datos: MatriculaGrupo[]): void {
       <table>
         <thead><tr><th>#</th><th style="text-align:left">Estudiante</th><th>Presente</th><th>Ausente</th><th>Observación (no vino hoy / lesionado / con acudiente)</th></tr></thead>
         <tbody>
-          ${lista.map((p, i) => `<tr><td class="n">${i + 1}</td><td>${nombreCompleto(p)}</td><td class="chk"><span class="box"></span></td><td class="chk"><span class="box"></span></td><td class="obs"></td></tr>`).join('')}
+          ${lista.map((p, i) => `<tr><td class="n" ${td}>${i + 1}</td><td ${td}>${nombreCompleto(p)}</td><td class="chk" ${td}><span class="box"></span></td><td class="chk" ${td}><span class="box"></span></td><td class="obs" ${td}></td></tr>`).join('')}
           ${filaVacia.repeat(3)}
         </tbody>
       </table>
