@@ -365,6 +365,70 @@ function imprimirMatricula(datos: MatriculaGrupo[], anio: number): void {
   );
 }
 
+// ── Listas de chequeo para simulacro de emergencia ──────────
+// Una página por grupo, solo estudiantes activos, con casillas
+// Presente/Ausente para que el director de grupo haga el conteo.
+
+const SIMULACRO_CSS = `
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 11px; }
+.page { padding: 14px 22px; page-break-after: always; }
+.hdr { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #b91c1c; padding-bottom: 6px; margin-bottom: 8px; }
+.hdr img { height: 46px; }
+.hdr h1 { font-size: 13px; text-transform: uppercase; }
+.hdr .sub { font-size: 9px; color: #555; }
+.tit { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px; }
+.tit h2 { font-size: 15px; color: #b91c1c; text-transform: uppercase; }
+.tit .grupo { font-size: 22px; font-weight: 900; }
+.meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px 14px; font-size: 10px; margin-bottom: 8px; }
+.meta span { display: block; border-bottom: 1px solid #999; height: 16px; padding-top: 2px; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #e5e5e5; font-size: 9px; text-transform: uppercase; border: 0.5px solid #888; padding: 4px; }
+td { border: 0.5px solid #888; padding: 3px 5px; height: 20px; }
+.n { width: 24px; text-align: center; color: #666; }
+.chk { width: 62px; text-align: center; }
+.box { display: inline-block; width: 13px; height: 13px; border: 1.3px solid #222; border-radius: 2px; }
+.obs { width: 30%; }
+.tot { display: flex; gap: 18px; margin-top: 10px; font-size: 11px; font-weight: bold; }
+.tot span { display: inline-block; min-width: 44px; border-bottom: 1px solid #222; }
+.firma { margin-top: 28px; display: flex; justify-content: space-between; font-size: 9px; color: #444; }
+.firma div { border-top: 0.5px solid #555; width: 220px; text-align: center; padding-top: 3px; }
+.nota { font-size: 8.5px; color: #666; margin-top: 6px; }
+@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+`;
+
+function imprimirListasSimulacro(datos: MatriculaGrupo[]): void {
+  const hoy = new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
+  const filaVacia = `<tr><td class="n">+</td><td></td><td class="chk"><span class="box"></span></td><td class="chk"><span class="box"></span></td><td class="obs"></td></tr>`;
+  const paginas = datos.filter(d => d.activos.length > 0).map(d => {
+    const lista = [...d.activos].sort((a, b) => nombreCompleto(a).localeCompare(nombreCompleto(b), 'es'));
+    return `
+    <div class="page">
+      <div class="hdr"><img src="${LOGO_URL}" alt="" /><div>
+        <h1>I.E. Rural Miguel Pinedo Barros</h1><p class="sub">${UBICACION}</p></div></div>
+      <div class="tit"><h2>Simulacro de emergencia — Lista de chequeo</h2><div class="grupo">${d.grupo.nombre}</div></div>
+      <div class="meta">
+        <label>Fecha<span>${hoy}</span></label>
+        <label>Hora de conteo<span></span></label>
+        <label>Punto de encuentro<span></span></label>
+        <label style="grid-column: span 2">Director(a) de grupo<span></span></label>
+        <label>Estudiantes activos<span style="font-weight:bold">${lista.length}</span></label>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th style="text-align:left">Estudiante</th><th>Presente</th><th>Ausente</th><th>Observación (no vino hoy / lesionado / con acudiente)</th></tr></thead>
+        <tbody>
+          ${lista.map((p, i) => `<tr><td class="n">${i + 1}</td><td>${nombreCompleto(p)}</td><td class="chk"><span class="box"></span></td><td class="chk"><span class="box"></span></td><td class="obs"></td></tr>`).join('')}
+          ${filaVacia.repeat(3)}
+        </tbody>
+      </table>
+      <div class="tot">Presentes: <span></span> Ausentes: <span></span> No ubicados: <span></span></div>
+      <div class="firma"><div>Firma director(a) de grupo</div><div>Recibido — Brigada / Coordinación</div></div>
+      <p class="nota">Las filas con "+" son para estudiantes que no aparecen en la lista. Solo incluye estudiantes activos (sin retirados).</p>
+    </div>`;
+  }).join('');
+  abrirVentana('Listas simulacro — Secundaria', paginas, SIMULACRO_CSS);
+}
+
 // ── Totalizado institucional (sin separar por grado) ────────
 // Un estudiante puede tener matrícula en dos grupos (p. ej. pasó de un grado
 // regular a MEF, con documento "123_mef"). Aquí se cuenta una sola vez:
@@ -669,6 +733,12 @@ export function ReportesView() {
                   <span>🖨</span> Por grado
                 </button>
               </div>
+              <button
+                onClick={() => imprimirListasSimulacro(matriculaDatos)}
+                className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-red-600 text-white font-semibold text-sm shadow hover:bg-red-700 active:scale-95 transition-all"
+              >
+                <span>📋</span> Listas para simulacro
+              </button>
               <p className="text-[10px] text-slate-300 max-w-xs">
                 Totalizado: cifras generales y listado único de retirados y activos. Por grado: resumen y listado de cada grado.
               </p>
