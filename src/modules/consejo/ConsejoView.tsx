@@ -3,7 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
 import { PRINT_CSS, abrirVentana, reportEncabezado } from '../reportes/ReportesView';
 import {
-  CORTES, PERIODOS, DECISIONES, analizar, asignaturasDeArea, decisionSugerida, guardarConfig, periodosIncompletos,
+  CORTES, PERIODOS, DECISIONES, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
+  decisionSugerida, guardarConfig, periodosIncompletos,
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
   type EstudianteConsejo, type GrupoConsejo,
@@ -50,6 +51,20 @@ function tablaResumen(filasPorGrupo: Map<GrupoConsejo, Fila[]>, cfg: ConfigConse
     <tbody>${filas}<tr><th style="text-align:left">TOTAL</th><th>${tt}</th><th>${t1}</th><th>${t2}</th><th>${t3}</th><th>${t4}</th><th>${t5}</th></tr></tbody></table>`;
 }
 
+/** Texto de la decisión para el acta: incluye qué áreas recupera. */
+function textoDecision(f: Fila): string {
+  let html = `<b>${esc(labelDecision(f.decision))}</b>`;
+  if (conRecuperacion(f.decision) && f.an.perdidas.length > 0) {
+    const sel = areasARecuperar(f.an.perdidas, f.guardada);
+    const notas = f.guardada?.notas_recuperacion ?? {};
+    const no = f.an.perdidas.map(p => p.area).filter(a => !sel.includes(a));
+    html += `<br>Recupera: ${sel.length ? sel.map(a => `${esc(a)}${notas[a] != null ? ` → ${fmt(notas[a])}` : ''}`).join(', ') : '—'}`;
+    if (no.length) html += `<br><span style="color:#555">No se le exige: ${no.map(esc).join(', ')}</span>`;
+  }
+  if (f.guardada?.observacion) html += `<br><span style="color:#555">${esc(f.guardada.observacion)}</span>`;
+  return html;
+}
+
 function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo): void {
   const detalle = [...filasPorGrupo.entries()].map(([g, fs]) => {
     const conCaso = fs.filter(f => f.an.perdidas.length > 0 || f.an.sinNingunaNota);
@@ -60,7 +75,7 @@ function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cf
         <td class="nombre">${esc(f.est.nombre)}</td>
         <td>${f.an.sinNingunaNota ? '<i>Sin notas registradas</i>' : f.an.perdidas.map(p => `<span class="perd">${esc(p.area)}</span> ${fmt(p.nota)}${p.incompleta ? '*' : ''}`).join(' · ')}</td>
         <td class="c">${f.an.perdidas.length}</td>
-        <td><b>${esc(labelDecision(f.decision))}</b>${f.guardada?.observacion ? `<br><span style="color:#555">${esc(f.guardada.observacion)}</span>` : ''}</td></tr>`).join('');
+        <td>${textoDecision(f)}</td></tr>`).join('');
     return `<h3>${esc(g.nombre)} — ${conCaso.length} de ${fs.length} estudiantes con áreas perdidas</h3>
       <table><thead><tr><th class="num">#</th><th class="nombre">Estudiante</th><th>Áreas perdidas (nota)</th><th>N°</th><th>Decisión del consejo / observación</th></tr></thead>
       <tbody>${filas}</tbody></table>`;
@@ -84,11 +99,15 @@ function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cf
 
 function imprimirRecuperaciones(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo): void {
   // Agrupar por área: qué estudiantes de qué grupo deben recuperarla
+  // Entran: "Va a recuperación" (solo las áreas que escogió el consejo) y
+  // los que siguen pendientes de decisión (todas sus áreas perdidas).
   const porArea = new Map<string, { g: GrupoConsejo; f: Fila; nota: number }[]>();
   for (const [g, fs] of filasPorGrupo) {
     for (const f of fs) {
-      if (f.decision === 'NO_PROMOVIDO' || f.decision === 'RETIRADO' || f.decision === 'RECUPERO') continue;
+      if (f.decision !== 'RECUPERACION' && f.decision !== 'PENDIENTE') continue;
+      const sel = f.decision === 'RECUPERACION' ? areasARecuperar(f.an.perdidas, f.guardada) : f.an.perdidas.map(p => p.area);
       for (const p of f.an.perdidas) {
+        if (!sel.includes(p.area)) continue;
         if (!porArea.has(p.area)) porArea.set(p.area, []);
         porArea.get(p.area)!.push({ g, f, nota: p.nota });
       }
@@ -105,7 +124,8 @@ function imprimirRecuperaciones(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte:
         .filter(o => o.v != null && o.v < cfg.notaMinima)
         .map(o => `${esc(o.s)} ${fmt(o.v)}`).join(' · ');
       return `<tr><td class="num">${i + 1}</td><td class="c">${esc(x.g.nombre)}</td><td class="nombre">${esc(x.f.est.nombre)}</td>
-        <td class="c perd">${fmt(x.nota)}</td><td>${asigs || '—'}</td><td style="width:70px"></td></tr>`;
+        <td class="c perd">${fmt(x.nota)}</td><td>${asigs || '—'}</td>
+        <td class="c" style="width:70px;font-weight:bold">${x.f.guardada?.notas_recuperacion?.[a] != null ? fmt(x.f.guardada.notas_recuperacion[a]) : ''}</td></tr>`;
     }).join('');
     return `<div class="${idx > 0 ? 'pg' : ''}">
       ${reportEncabezado(`Plan de recuperación — ${esc(nombreArea(a))} (${esc(a)})`, etiquetaCorte(corte), `${lista.length} estudiantes`, false)}
@@ -426,12 +446,93 @@ export function ConsejoView() {
                   onGuardar={v => guardarDecision(corte, f.grupo.clave, f.est.nombre, { observacion: v, decision: f.decision })} />
               </div>
 
+              {conRecuperacion(f.decision) && f.an.perdidas.length > 0 && (
+                <AreasRecuperacion f={f} corte={corte} cfg={cfg} />
+              )}
+
               {abierto && <Detalle f={f} corte={corte} cfg={cfg} />}
             </div>
           );
         })}
       </div>
     </div>
+  );
+}
+
+/** Selección de las áreas que el consejo decide que el estudiante
+ *  recupera, y la nota que obtuvo en cada recuperación. */
+function AreasRecuperacion({ f, corte, cfg }: { f: Fila; corte: Corte; cfg: ConfigConsejo }) {
+  const sel = areasARecuperar(f.an.perdidas, f.guardada);
+  const notas = f.guardada?.notas_recuperacion ?? {};
+  const guardar = (cambios: Parameters<typeof guardarDecision>[3]) =>
+    guardarDecision(corte, f.grupo.clave, f.est.nombre, { decision: f.decision, ...cambios });
+
+  const alternar = (area: string) => {
+    const nueva = sel.includes(area) ? sel.filter(a => a !== area) : [...sel, area];
+    guardar({ areas_recuperar: nueva });
+  };
+  const ponerNota = (area: string, v: string) => {
+    const n = { ...notas };
+    const num = Number(v.replace(',', '.'));
+    if (v.trim() === '' || Number.isNaN(num)) delete n[area]; else n[area] = Math.min(10, Math.max(0, num));
+    guardar({ notas_recuperacion: n });
+  };
+
+  const conNota = sel.filter(a => notas[a] != null);
+  const aprobo = sel.length > 0 && sel.every(a => (notas[a] ?? -1) >= cfg.notaMinima);
+
+  return (
+    <div className="rounded-lg bg-amber-50/60 border border-amber-200 px-2.5 py-2 flex flex-col gap-1.5">
+      <p className="text-[11px] text-amber-900 font-semibold">
+        Áreas que va a recuperar <span className="font-normal text-amber-700">(toque para marcar o quitar)</span>
+      </p>
+      <div className="flex flex-col gap-1">
+        {f.an.perdidas.map(p => {
+          const activa = sel.includes(p.area);
+          const nr = notas[p.area];
+          return (
+            <div key={p.area} className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => alternar(p.area)}
+                className={`text-xs rounded-md border px-2 py-1 text-left min-w-[200px] transition-colors ${activa
+                  ? 'bg-amber-200 border-amber-400 text-amber-950 font-semibold'
+                  : 'bg-white border-slate-200 text-slate-400 line-through'}`}>
+                {activa ? '☑' : '☐'} {nombreArea(p.area)} <b>{fmt(p.nota)}</b>
+              </button>
+              {activa && (
+                <label className="flex items-center gap-1 text-[11px] text-slate-600">
+                  Nota recuperación:
+                  <NotaInput valor={nr} onGuardar={v => ponerNota(p.area, v)} />
+                  {nr != null && (
+                    <span className={`font-bold ${nr >= cfg.notaMinima ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {nr >= cfg.notaMinima ? '✓ recuperó' : '✗ no alcanzó'}
+                    </span>
+                  )}
+                </label>
+              )}
+              {!activa && <span className="text-[10px] text-slate-400">el consejo no se la exige</span>}
+            </div>
+          );
+        })}
+      </div>
+      {f.decision === 'RECUPERACION' && aprobo && conNota.length === sel.length && (
+        <button onClick={() => guardar({ decision: 'RECUPERO' })}
+          className="self-start text-xs px-3 py-1.5 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-700">
+          ✓ Recuperó todas las áreas → marcar "Recuperó → promovido"
+        </button>
+      )}
+    </div>
+  );
+}
+
+function NotaInput({ valor, onGuardar }: { valor: number | undefined; onGuardar: (v: string) => void }) {
+  const txt = valor != null ? String(valor) : '';
+  const [v, setV] = useState(txt);
+  useEffect(() => { setV(txt); }, [txt]);
+  return (
+    <input value={v} inputMode="decimal" placeholder="—"
+      onChange={e => setV(e.target.value)}
+      onBlur={() => { if (v !== txt) onGuardar(v); }}
+      className="w-14 text-xs text-slate-900 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-center" />
   );
 }
 

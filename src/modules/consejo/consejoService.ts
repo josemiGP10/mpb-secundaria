@@ -58,7 +58,20 @@ export interface DecisionConsejo {
   nombre: string;
   decision: Decision;
   observacion: string;
+  /** Áreas que el consejo decidió que va a recuperar. Si no existe, se
+   *  asumen todas las áreas perdidas. */
+  areas_recuperar?: string[];
+  /** Nota obtenida en la recuperación, por área. */
+  notas_recuperacion?: Record<string, number>;
   updated_at: string;
+}
+
+/** Decisiones en las que aplica escoger áreas a recuperar. */
+export const conRecuperacion = (d: Decision) => d === 'RECUPERACION' || d === 'RECUPERO';
+
+export function areasARecuperar(perdidas: { area: string }[], guardada?: DecisionConsejo): string[] {
+  const perd = perdidas.map(p => p.area);
+  return guardada?.areas_recuperar ? perd.filter(a => guardada.areas_recuperar!.includes(a)) : perd;
 }
 
 export interface ConfigConsejo {
@@ -256,7 +269,8 @@ export function decisionSugerida(a: Analisis, corte: Corte, cfg: ConfigConsejo):
 export const idDecision = (corte: Corte, grupo: string, nombre: string) => `${corte}|${grupo}|${nombre}`;
 
 export async function guardarDecision(
-  corte: Corte, grupo: string, nombre: string, cambios: Partial<Pick<DecisionConsejo, 'decision' | 'observacion'>>,
+  corte: Corte, grupo: string, nombre: string,
+  cambios: Partial<Pick<DecisionConsejo, 'decision' | 'observacion' | 'areas_recuperar' | 'notas_recuperacion'>>,
 ): Promise<void> {
   const id = idDecision(corte, grupo, nombre);
   const prev = await db.consejo_decisiones.get(id);
@@ -264,6 +278,8 @@ export async function guardarDecision(
     id, corte, grupo, nombre,
     decision: cambios.decision ?? prev?.decision ?? 'PENDIENTE',
     observacion: cambios.observacion ?? prev?.observacion ?? '',
+    areas_recuperar: cambios.areas_recuperar ?? prev?.areas_recuperar,
+    notas_recuperacion: cambios.notas_recuperacion ?? prev?.notas_recuperacion,
     updated_at: new Date().toISOString(),
   });
 }
