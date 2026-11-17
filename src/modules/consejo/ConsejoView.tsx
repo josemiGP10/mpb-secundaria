@@ -404,12 +404,12 @@ export function ConsejoView() {
                   {f.an.perdidas.map(p => (
                     <span key={p.area}
                       title={`${nombreArea(p.area)}${p.incompleta ? ' — falta la nota de algún período; la final puede cambiar' : ''}`}
-                      className={`text-[11px] rounded-md border px-1.5 py-0.5 ${p.incompleta ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                      {p.area} <b>{fmt(p.nota)}</b>{p.incompleta && ' *'}
+                      className={`text-xs rounded-md border px-2 py-0.5 ${p.incompleta ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                      {nombreArea(p.area)} <b>{fmt(p.nota)}</b>{p.incompleta && ' *'}
                     </span>
                   ))}
                   {f.an.sinNota.length > 0 && !f.an.sinNingunaNota && (
-                    <span className="text-[11px] text-slate-400 px-1">sin nota: {f.an.sinNota.join(', ')}</span>
+                    <span className="text-[11px] text-slate-400 px-1">sin nota: {f.an.sinNota.map(nombreArea).join(', ')}</span>
                   )}
                 </div>
               )}
