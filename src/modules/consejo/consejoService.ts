@@ -25,10 +25,15 @@ export interface GrupoConsejo {
   clave: string;        // nombre tal cual viene ("Sexto A Unica")
   nombre: string;       // legible ("6° A")
   grado: number;
+  /** Períodos que usa el grupo: 4 regulares, 2 (semestres) en MEF y
+   *  Aceleración. Se deduce de qué períodos traen notas. */
+  numPeriodos?: number;
   areas: string[];
   asignaturas: string[];
   estudiantes: EstudianteConsejo[];
 }
+
+export const periodosDe = (g: GrupoConsejo): Corte[] => PERIODOS.slice(0, g.numPeriodos ?? 4);
 
 export interface ImportConsejo {
   id: 'actual';
@@ -113,6 +118,8 @@ const AREA_DE_ASIGNATURA: Record<string, string[]> = {
   E2: ['MOT'], ECIYT: ['MOT'], ECLUB: ['MOT'], EJARY: ['MOT'], EJTUR: ['MOT'], Ej: ['MOT'],
   AFROC: ['RU'], ERyP: ['RU'],
   SOC: ['SOC'], CCIU: ['SOC'], GEOG: ['SOC'], HIST: ['SOC'], CYECO: ['SOC'], FIL: ['SOC'],
+  // MEF y Aceleración
+  PPP: ['SOC'], QUYBI: ['CNAT'], Raice: ['RU'],
 };
 
 export function asignaturasDeArea(grupo: GrupoConsejo, area: string): string[] {
@@ -132,6 +139,12 @@ const GRADOS: [RegExp, number][] = [
 
 function nombreGrupo(raw: string): { nombre: string; grado: number } {
   const limpio = raw.replace(/\s+/g, ' ').trim();
+  // La plataforma exporta "MEF 6�-7� A Unica" (el símbolo de grado llega dañado)
+  if (/^mef/i.test(limpio)) {
+    const nums = limpio.match(/\d+/g) ?? [];
+    return { nombre: `MEF ${nums.join('-')}`, grado: 20 + Number(nums[0] ?? 0) };
+  }
+  if (/^aceleraci/i.test(limpio)) return { nombre: 'Aceleración', grado: 5 };
   for (const [re, g] of GRADOS) {
     if (re.test(limpio)) {
       const letra = limpio.split(' ')[1] ?? '';
@@ -142,6 +155,104 @@ function nombreGrupo(raw: string): { nombre: string; grado: number } {
 }
 
 const normNombre = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
+
+/** Nombre comparable entre la plataforma y el diario: sin tildes, en
+ *  mayúscula y sin espacios dobles. La plataforma exporta la Ñ y las
+ *  tildes dañadas (carácter �); esas posiciones quedan como "?" y se
+ *  tratan como comodín al comparar. */
+// Marcas de tilde (U+0300 a U+036F) y caracter de reemplazo U+FFFD, armados
+// con codigos para no depender de como se guarden esos simbolos en el archivo.
+const SIN_TILDES = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']', 'g');
+const CARACTER_DANADO = new RegExp(String.fromCharCode(0xfffd), 'g');
+
+export function normalizarNombre(s: string): string {
+  return s.normalize('NFD').replace(SIN_TILDES, '').replace(CARACTER_DANADO, '?')
+    .toUpperCase().replace(/\s+/g, ' ').trim();
+}
+
+export interface IndiceDiario {
+  conjunto: Set<string>;     // todos los nombres del diario (normalizados)
+  lista: string[];
+  retirados: Set<string>;    // nombres de estudiantes retirados
+}
+
+/** Índice de estudiantes del diario con su estado, con la MISMA regla de
+ *  la lista de asistencia: dentro de un grupo, si hay copias duplicadas y
+ *  alguna está retirada, el estudiante está retirado de ese grupo. Solo
+ *  cuenta como retirado si lo está en TODOS sus grupos (si pasó de 7° a
+ *  MEF y sigue activo allá, no está retirado). */
+export function construirIndiceDiario(
+  matriculas: { estudiante_id: string; grupo_id: string; activo: boolean }[],
+  estudiantes: Map<string, { tipo_doc: string; doc: string; apellido1: string; apellido2: string; nombre1: string; nombre2: string }>,
+): IndiceDiario {
+  const porDoc = new Map<string, { nombres: Set<string>; grupos: Map<string, boolean> }>();
+  for (const m of matriculas) {
+    const e = estudiantes.get(m.estudiante_id);
+    if (!e) continue;
+    const doc = `${e.tipo_doc}-${String(e.doc).replace(/_mef$/i, '')}`;
+    if (!porDoc.has(doc)) porDoc.set(doc, { nombres: new Set(), grupos: new Map() });
+    const x = porDoc.get(doc)!;
+    x.nombres.add(normalizarNombre([e.apellido1, e.apellido2, e.nombre1, e.nombre2].filter(Boolean).join(' ')));
+    x.grupos.set(m.grupo_id, (x.grupos.get(m.grupo_id) ?? false) || m.activo === false);
+  }
+  const conjunto = new Set<string>(), retirados = new Set<string>(), activos = new Set<string>();
+  for (const { nombres, grupos } of porDoc.values()) {
+    const retirado = [...grupos.values()].every(Boolean);
+    for (const n of nombres) { conjunto.add(n); (retirado ? retirados : activos).add(n); }
+  }
+  // Un mismo nombre con un documento activo y otro retirado: se toma activo
+  for (const n of activos) retirados.delete(n);
+  return { conjunto, lista: [...conjunto], retirados };
+}
+
+/** Distancia de edición entre dos nombres; "?" (letra dañada) no cuenta. */
+function distancia(a: string, b: string, tope: number): number {
+  if (Math.abs(a.length - b.length) > tope) return tope + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let minFila = i;
+    for (let j = 1; j <= b.length; j++) {
+      const igual = a[i - 1] === b[j - 1] || a[i - 1] === '?' || b[j - 1] === '?';
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (igual ? 0 : 1));
+      if (cur[j] < minFila) minFila = cur[j];
+    }
+    if (minFila > tope) return tope + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Busca el nombre de la plataforma entre los nombres del diario (ya
+ *  normalizados). Primero exacto; si no, tolera hasta 2 letras de
+ *  diferencia (errores de digitación entre plataforma y diario), siempre
+ *  que coincida el primer apellido. Devuelve el nombre del diario o null. */
+export function buscarEnDiario(nombrePlataforma: string, conjunto: Set<string>, lista: string[]): string | null {
+  const n = normalizarNombre(nombrePlataforma);
+  if (conjunto.has(n)) return n;
+  const tokens = n.split(' ');
+  const ap = tokens[0];
+  let mejor: string | null = null, mejorD = 3;
+  for (const x of lista) {
+    // El primer apellido debe coincidir (se tolera 1 letra: OSORIO/OSORIOS)
+    if (distancia(x.split(' ')[0], ap, 1) > 1) continue;
+    const d = distancia(n, x, 2);
+    if (d < mejorD) { mejor = x; mejorD = d; if (d === 0) break; }
+  }
+  if (mejor) return mejor;
+
+  // Un nombre contenido en el otro: le falta o le sobra un nombre
+  // ("RODRIGUEZ ALTAMAR RICARDO" ⊂ "RODRIGUEZ ALTAMAR RICARDO EDUARDO") o
+  // viene en otro orden ("JOSE FRANCISCO PINEDA PEREZ"). Se exigen al menos
+  // 3 palabras en común y que sea el único candidato, para no confundir hermanos.
+  const set = new Set(tokens);
+  const candidatos = lista.filter(x => {
+    const tx = x.split(' ');
+    const [corto, largo] = tx.length <= set.size ? [tx, set] : [tokens, new Set(tx)];
+    return corto.length >= 3 && corto.every(t => largo.has(t));
+  });
+  return candidatos.length === 1 ? candidatos[0] : null;
+}
 const aNota = (v: Celda): number | null => (typeof v === 'number' && !Number.isNaN(v) ? v : null);
 
 interface GrupoLeido {
@@ -185,7 +296,12 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
   return grupos;
 }
 
-export async function importarConsolidados(fileAreas: File, fileAsig: File | null): Promise<ImportConsejo> {
+/** Carga un par de consolidados. Por defecto los grupos se AGREGAN a los
+ *  ya cargados (los regulares y los MEF vienen en archivos distintos);
+ *  un grupo que ya existía se reemplaza por la versión nueva. */
+export async function importarConsolidados(
+  fileAreas: File, fileAsig: File | null, reemplazarTodo = false,
+): Promise<ImportConsejo> {
   const areas = parsearConsolidado(await leerPrimeraHoja(fileAreas));
   if (areas.length === 0) throw new Error('No se encontraron grupos en el consolidado de áreas. ¿Es el archivo correcto?');
   const asigs = fileAsig ? parsearConsolidado(await leerPrimeraHoja(fileAsig)) : [];
@@ -194,22 +310,32 @@ export async function importarConsolidados(fileAreas: File, fileAsig: File | nul
   const grupos: GrupoConsejo[] = areas.map(ga => {
     const gs = asigs.find(x => x.clave === ga.clave);
     const { nombre, grado } = nombreGrupo(ga.clave);
+    // Último período con alguna nota en el grupo (MEF/Aceleración = 2 semestres)
+    let numPeriodos = 0;
+    PERIODOS.forEach((p, i) => {
+      if ([...ga.est.values()].some(n => Object.values(n[p] ?? {}).some(v => v != null))) numPeriodos = i + 1;
+    });
     return {
-      clave: ga.clave, nombre, grado,
+      clave: ga.clave, nombre, grado, numPeriodos: numPeriodos || 4,
       areas: ga.cols,
       asignaturas: gs?.cols ?? [],
       estudiantes: [...ga.est.entries()].map(([n, notas]) => ({
         nombre: n, areas: notas, asignaturas: gs?.est.get(n),
       })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     };
-  }).sort((a, b) => a.grado - b.grado || a.nombre.localeCompare(b.nombre, 'es'));
+  });
+
+  const previo = reemplazarTodo ? undefined : await db.consejo_import.get('actual');
+  const nuevas = new Set(grupos.map(g => g.clave));
+  const todos = [...(previo?.grupos ?? []).filter(g => !nuevas.has(g.clave)), ...grupos]
+    .sort((a, b) => a.grado - b.grado || a.nombre.localeCompare(b.nombre, 'es'));
 
   const data: ImportConsejo = {
     id: 'actual',
     importado_at: new Date().toISOString(),
     archivo_areas: fileAreas.name,
     archivo_asignaturas: fileAsig?.name ?? null,
-    grupos,
+    grupos: todos,
   };
   await db.consejo_import.put(data);
   return data;
@@ -234,7 +360,7 @@ export function analizar(e: EstudianteConsejo, grupo: GrupoConsejo, corte: Corte
     const v = notas[a];
     if (v == null) { sinNota.push(a); continue; }
     vals.push(v);
-    const incompleta = corte === 'FINAL' && PERIODOS.some(p => e.areas[p]?.[a] == null);
+    const incompleta = corte === 'FINAL' && periodosDe(grupo).some(p => e.areas[p]?.[a] == null);
     if (v < cfg.notaMinima) perdidas.push({ area: a, nota: v, incompleta });
   }
   return {
@@ -251,7 +377,7 @@ export function periodosIncompletos(grupo: GrupoConsejo): { area: string; period
   const res: { area: string; periodo: Corte; faltan: number }[] = [];
   const n = grupo.estudiantes.length;
   for (const a of grupo.areas) {
-    for (const p of PERIODOS) {
+    for (const p of periodosDe(grupo)) {
       const faltan = grupo.estudiantes.filter(e => e.areas[p]?.[a] == null).length;
       if (n > 0 && faltan / n >= 0.5) res.push({ area: a, periodo: p, faltan });
     }

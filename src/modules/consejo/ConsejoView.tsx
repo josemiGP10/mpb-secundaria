@@ -3,9 +3,9 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
 import { PRINT_CSS, abrirVentana, reportEncabezado } from '../reportes/ReportesView';
 import {
-  CORTES, PERIODOS, DECISIONES, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
+  CORTES, DECISIONES, periodosDe, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
   decisionSugerida, guardarConfig, periodosIncompletos,
-  guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea,
+  guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
   type EstudianteConsejo, type GrupoConsejo,
 } from './consejoService';
@@ -20,6 +20,7 @@ interface Fila {
   an: Analisis;
   sugerida: Decision;
   retiradoDiario: boolean;     // figura como retirado en la matrícula del diario
+  nombreDiario: string | null; // con qué nombre se encontró en la matrícula del diario
   guardada?: DecisionConsejo;
   decision: Decision;          // la guardada o, si no hay, la sugerida
 }
@@ -65,7 +66,7 @@ function textoDecision(f: Fila): string {
   return html;
 }
 
-function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo): void {
+function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo, retiradosOcultos = 0): void {
   const detalle = [...filasPorGrupo.entries()].map(([g, fs]) => {
     const conCaso = fs.filter(f => f.an.perdidas.length > 0 || f.an.sinNingunaNota);
     const filas = conCaso.length === 0
@@ -90,7 +91,8 @@ function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cf
       false,
     ) +
       tablaResumen(filasPorGrupo, cfg) + detalle +
-      `<p style="margin-top:14px;font-size:9px;color:#555">* Nota final calculada con algún período sin nota en la plataforma (puede cambiar).</p>` +
+      (retiradosOcultos > 0 ? `<p style="margin-top:14px;font-size:9px;color:#555">No se incluyen ${retiradosOcultos} estudiantes que figuran como retirados en la matrícula del diario.</p>` : "") +
+      `<p style="margin-top:6px;font-size:9px;color:#555">* Nota final calculada con algún período sin nota en la plataforma (puede cambiar).</p>` +
       `<p style="margin-top:4px;font-size:9px;color:#555">Convenciones:${[...new Set([...filasPorGrupo.keys()].flatMap(g => g.areas))].map(a => `${esc(a)} = ${esc(nombreArea(a))}`).join(' · ')}</p>` +
       `<div class="firmas"><div>Rector(a)</div><div>Coordinador(a)</div><div>Secretario(a) del consejo</div><div>Docente</div><div>Docente</div><div>Docente</div></div>`,
     PRINT_CSS + CSS_EXTRA,
@@ -152,47 +154,48 @@ export function ConsejoView() {
   const [fileAsig, setFileAsig]       = useState<File | null>(null);
   const [importando, setImportando]   = useState(false);
   const [error, setError]             = useState<string | null>(null);
+  const [reemplazarTodo, setReemplazarTodo] = useState(false);
+  const [mostrarRetirados, setMostrarRetirados] = useState(false);
 
   const data = useLiveQuery(() => db.consejo_import.get('actual'), []);
   const decisiones = useLiveQuery(
     () => db.consejo_decisiones.where('corte').equals(corte).toArray(), [corte],
   );
 
-  // Estudiantes retirados según la matrícula del diario (mismo formato de
-  // nombre que la plataforma: APELLIDO1 APELLIDO2 NOMBRE1 NOMBRE2). Si el
-  // estudiante sigue activo en algún grupo (p. ej. pasó a MEF), no cuenta.
-  const retiradosDiario = useLiveQuery(async () => {
+  // Índice de la matrícula del diario (la misma de la lista de asistencia)
+  // para saber qué estudiantes de la plataforma están retirados.
+  const indiceDiario = useLiveQuery(async () => {
     const anio = new Date().getFullYear();
     const mats = await db.matriculas.where('anio').equals(anio).toArray();
-    const ests = await db.estudiantes.bulkGet(mats.map(m => m.estudiante_id));
-    const activos = new Set<string>(), retirados = new Set<string>();
-    mats.forEach((m, i) => {
-      const e = ests[i];
-      if (!e) return;
-      const n = [e.apellido1, e.apellido2, e.nombre1, e.nombre2].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase();
-      (m.activo === false ? retirados : activos).add(n);
-    });
-    return new Set([...retirados].filter(n => !activos.has(n)));
+    const ests = await db.estudiantes.bulkGet([...new Set(mats.map(m => m.estudiante_id))]);
+    return construirIndiceDiario(mats, new Map(ests.filter(e => !!e).map(e => [e!.id, e!])));
   }, []);
 
   const cambiarCfg = (c: ConfigConsejo) => { setCfg(c); guardarConfig(c); };
 
-  const filasPorGrupo = useMemo(() => {
+  // Filas por grupo. Los retirados del diario se apartan (no salen en la
+  // lista, el resumen ni el acta) salvo que se pida verlos.
+  const { filasPorGrupo, nRetiradosOcultos } = useMemo(() => {
     const mapa = new Map<GrupoConsejo, Fila[]>();
-    if (!data) return mapa;
+    let ocultos = 0;
+    if (!data) return { filasPorGrupo: mapa, nRetiradosOcultos: 0 };
     const dec = new Map((decisiones ?? []).map(d => [d.id, d]));
     for (const g of data.grupos) {
       if (grupoSel !== 'TODOS' && g.clave !== grupoSel) continue;
-      mapa.set(g, g.estudiantes.map(est => {
+      const filas: Fila[] = [];
+      for (const est of g.estudiantes) {
+        const enDiario = indiceDiario ? buscarEnDiario(est.nombre, indiceDiario.conjunto, indiceDiario.lista) : null;
+        const retiradoDiario = !!enDiario && indiceDiario!.retirados.has(enDiario);
+        if (retiradoDiario && !mostrarRetirados) { ocultos++; continue; }
         const an = analizar(est, g, corte, cfg);
-        const retiradoDiario = retiradosDiario?.has(est.nombre) ?? false;
         const sugerida = retiradoDiario ? 'RETIRADO' : decisionSugerida(an, corte, cfg);
         const guardada = dec.get(idDecision(corte, g.clave, est.nombre));
-        return { grupo: g, est, an, sugerida, retiradoDiario, guardada, decision: guardada?.decision ?? sugerida };
-      }));
+        filas.push({ grupo: g, est, an, sugerida, retiradoDiario, nombreDiario: enDiario, guardada, decision: guardada?.decision ?? sugerida });
+      }
+      mapa.set(g, filas);
     }
-    return mapa;
-  }, [data, decisiones, grupoSel, corte, cfg, retiradosDiario]);
+    return { filasPorGrupo: mapa, nRetiradosOcultos: ocultos };
+  }, [data, decisiones, grupoSel, corte, cfg, indiceDiario, mostrarRetirados]);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toUpperCase();
@@ -206,8 +209,8 @@ export function ConsejoView() {
     if (!fileAreas || importando) return;
     setImportando(true); setError(null);
     try {
-      await importarConsolidados(fileAreas, fileAsig);
-      setMostrarImport(false); setFileAreas(null); setFileAsig(null);
+      await importarConsolidados(fileAreas, fileAsig, reemplazarTodo);
+      setMostrarImport(false); setFileAreas(null); setFileAsig(null); setReemplazarTodo(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -260,9 +263,19 @@ export function ConsejoView() {
         )}
       </div>
       {data && (
-        <p className="text-[10px] text-slate-400">
-          Cargar archivos nuevos reemplaza las notas, pero conserva las decisiones y observaciones ya registradas.
-        </p>
+        <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-2">
+          <p className="text-[11px] text-slate-500">
+            <b>Ya cargados:</b> {data.grupos.map(g => g.nombre).join(' · ')}
+          </p>
+          <p className="text-[10px] text-slate-400">
+            Los grupos del archivo nuevo se <b>agregan</b> a los ya cargados (así se cargan regulares y MEF, que vienen en
+            consolidados distintos). Si un grupo ya estaba, se actualizan sus notas. Las decisiones y observaciones se conservan.
+          </p>
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+            <input type="checkbox" checked={reemplazarTodo} onChange={e => setReemplazarTodo(e.target.checked)} />
+            Borrar los grupos ya cargados y dejar solo los de este archivo
+          </label>
+        </div>
       )}
     </div>
   );
@@ -313,6 +326,10 @@ export function ConsejoView() {
           <label className="flex items-center gap-1">
             <input type="checkbox" checked={soloCasos} onChange={e => setSoloCasos(e.target.checked)} />
             Solo con áreas perdidas
+          </label>
+          <label className="flex items-center gap-1" title="Retirados según la matrícula del diario (la misma de la lista de asistencia)">
+            <input type="checkbox" checked={mostrarRetirados} onChange={e => setMostrarRetirados(e.target.checked)} />
+            Mostrar retirados{!mostrarRetirados && nRetiradosOcultos > 0 ? ` (${nRetiradosOcultos} ocultos)` : ''}
           </label>
           <button onClick={() => setVerCriterios(v => !v)} className="text-blue-600 hover:underline">⚙ Criterios</button>
           <button onClick={() => setMostrarImport(true)} className="text-blue-600 hover:underline">⤓ Cargar nuevos consolidados</button>
@@ -384,7 +401,7 @@ export function ConsejoView() {
 
         {/* Acciones */}
         <div className="flex gap-2 flex-wrap">
-          <button onClick={() => imprimirActa(filasPorGrupo, corte, cfg)}
+          <button onClick={() => imprimirActa(filasPorGrupo, corte, cfg, nRetiradosOcultos)}
             className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Acta del consejo</button>
           <button onClick={() => imprimirRecuperaciones(filasPorGrupo, corte, cfg)}
             className="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-semibold shadow hover:bg-amber-600">🖨 Recuperaciones por área</button>
@@ -409,7 +426,7 @@ export function ConsejoView() {
                 <span className="text-[10px] font-bold text-blue-800 bg-blue-100 rounded px-1.5 py-0.5">{f.grupo.nombre}</span>
                 {f.retiradoDiario && (
                   <span className="text-[10px] font-bold text-slate-700 bg-slate-200 rounded px-1.5 py-0.5"
-                    title="Figura como retirado en la matrícula del Diario Pedagógico">Retirado en el diario</span>
+                    title={`Retirado en la matrícula del Diario Pedagógico como: ${f.nombreDiario ?? ""}`}>Retirado en el diario{f.nombreDiario && f.nombreDiario !== f.est.nombre ? ` (${f.nombreDiario})` : ""}</span>
                 )}
                 <button onClick={() => toggle(id)} className="flex-1 text-left text-sm font-semibold text-slate-800 min-w-[180px]">
                   {f.est.nombre} <span className="text-slate-400 text-xs font-normal">{abierto ? '▲' : '▼'}</span>
@@ -552,7 +569,7 @@ function ObservacionInput({ valor, onGuardar }: { valor: string; onGuardar: (v: 
 }
 
 function Detalle({ f, corte, cfg }: { f: Fila; corte: Corte; cfg: ConfigConsejo }) {
-  const cols: Corte[] = [...PERIODOS, 'FINAL'];
+  const cols: Corte[] = [...periodosDe(f.grupo), 'FINAL'];
   const celda = (v: number | null | undefined, resaltar: boolean) => (
     <td className={`px-1.5 py-0.5 text-center ${v != null && v < cfg.notaMinima ? 'text-red-700 font-semibold' : ''} ${resaltar ? 'bg-blue-50' : ''}`}>{fmt(v)}</td>
   );
