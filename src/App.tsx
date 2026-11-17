@@ -4,8 +4,9 @@ import { CalificacionesView } from './modules/calificaciones/CalificacionesView'
 import { AsistenciaView } from './modules/asistencia/AsistenciaView';
 import { SecuenciasView } from './modules/secuencias/SecuenciasView';
 import { ReportesView } from './modules/reportes/ReportesView';
+import { ConsejoView } from './modules/consejo/ConsejoView';
 
-type Screen = 'home' | 'asistencia' | 'calificaciones' | 'secuencias' | 'reportes';
+type Screen = 'home' | 'asistencia' | 'calificaciones' | 'secuencias' | 'reportes' | 'consejo';
 
 interface NavItem { id: Screen; label: string; icon: string; }
 const NAV_ITEMS: NavItem[] = [
@@ -14,6 +15,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'calificaciones', label: 'Notas',    icon: '✎' },
   { id: 'secuencias',     label: 'Secuenc.', icon: '⊞' },
   { id: 'reportes',       label: 'Reporte',  icon: '🖨' },
+  { id: 'consejo',        label: 'Consejo',  icon: '⚖' },
 ];
 
 export function App() {
@@ -161,6 +163,7 @@ export function App() {
         {screen === 'calificaciones' && <CalificacionesView />}
         {screen === 'secuencias'     && <SecuenciasView />}
         {screen === 'reportes'       && <ReportesView />}
+        {screen === 'consejo'        && <ConsejoView />}
       </main>
 
       {/* Nav inferior */}
@@ -221,6 +224,9 @@ function HomeScreen({
         <ActionCard icon="⊞" title="Secuencias"
           description="Planeación didáctica y registro de cada sesión de clase"
           onClick={() => onNavigate('secuencias')} />
+        <ActionCard icon="⚖" title="Consejo Académico"
+          description="Áreas perdidas por estudiante, decisión de promoción y acta del consejo"
+          onClick={() => onNavigate('consejo')} />
       </div>
 
       {/* Respaldo manual */}

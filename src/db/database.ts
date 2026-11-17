@@ -5,6 +5,7 @@ import type {
   ActividadCognitiva, NotaCognitiva, Calificacion, RegistroAsistencia,
   Secuencia, Sesion, RegistroClase,
 } from './types';
+import type { ImportConsejo, DecisionConsejo } from '@/modules/consejo/consejoService';
 
 export class SecundariaDB extends Dexie {
   areas!:                  EntityTable<Area,               'id'>;
@@ -20,6 +21,8 @@ export class SecundariaDB extends Dexie {
   secuencias!:             EntityTable<Secuencia,          'id'>;
   sesiones!:               EntityTable<Sesion,             'id'>;
   registros_clase!:        EntityTable<RegistroClase,      'id'>;
+  consejo_import!:         EntityTable<ImportConsejo,      'id'>;
+  consejo_decisiones!:     EntityTable<DecisionConsejo,    'id'>;
 
   constructor() {
     // v2: nombre nuevo a propósito. Cualquier navegador que ya tuviera datos
@@ -43,6 +46,12 @@ export class SecundariaDB extends Dexie {
       secuencias:          'id, grupo_id, asignatura_id, periodo, anio, estado, [grupo_id+asignatura_id+anio]',
       sesiones:            'id, secuencia_id, orden, [secuencia_id+orden]',
       registros_clase:     'id, sesion_id, grupo_id, fecha, [sesion_id+grupo_id]',
+    });
+
+    // v2: Consejo académico (solo local; no entra al respaldo de Supabase)
+    this.version(2).stores({
+      consejo_import:      'id',
+      consejo_decisiones:  'id, corte, grupo',
     });
   }
 }

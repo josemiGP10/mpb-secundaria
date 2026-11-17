@@ -14,7 +14,7 @@ function sortGrupos<T extends { grado_cod: number; nombre: string }>(gs: T[]): T
 type TipoReporte = 'notas' | 'asistencia' | 'salones' | 'matricula';
 
 // ── CSS del reporte imprimible ──────────────────────────────
-const PRINT_CSS = `
+export const PRINT_CSS = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; padding: 12px; }
 .header { text-align: center; border-bottom: 1.5px solid #333; padding-bottom: 8px; margin-bottom: 14px; }
@@ -68,7 +68,7 @@ body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 18px 28p
 const LOGO_URL = `${window.location.origin}/logo-iermpb.jpg`;
 const UBICACION = 'La Punta de los Remedios, Dibulla - La Guajira';
 
-function reportEncabezado(titulo: string, sub1: string, sub2 = ''): string {
+export function reportEncabezado(titulo: string, sub1: string, sub2 = '', conDocente = true): string {
   const hoy = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
   return `
     <div class="header">
@@ -81,12 +81,12 @@ function reportEncabezado(titulo: string, sub1: string, sub2 = ''): string {
       </div>
       <h2>${titulo}</h2>
       <p class="sub">${sub1}${sub2 ? ' · ' + sub2 : ''}</p>
-      <p class="sub">Fecha: ${hoy} · Docente: J. González</p>
+      <p class="sub">Fecha: ${hoy}${conDocente ? ' · Docente: J. González' : ''}</p>
     </div>
   `;
 }
 
-function abrirVentana(titulo: string, cuerpo: string, css: string = PRINT_CSS): void {
+export function abrirVentana(titulo: string, cuerpo: string, css: string = PRINT_CSS): void {
   const win = window.open('', '_blank', 'width=960,height=720');
   if (!win) {
     alert('Permita ventanas emergentes en su navegador para imprimir.');
