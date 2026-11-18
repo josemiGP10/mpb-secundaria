@@ -44,7 +44,7 @@ export interface ImportConsejo {
 }
 
 export type Decision =
-  | 'PENDIENTE' | 'PROMOVIDO' | 'RECUPERACION' | 'RECUPERO' | 'NO_PROMOVIDO' | 'RETIRADO';
+  | 'PENDIENTE' | 'PROMOVIDO' | 'RECUPERACION' | 'RECUPERO' | 'NO_PROMOVIDO' | 'DESERTADO' | 'RETIRADO';
 
 export const DECISIONES: { id: Decision; label: string; color: string }[] = [
   { id: 'PENDIENTE',    label: 'Pendiente',                     color: 'bg-slate-100 text-slate-600' },
@@ -52,9 +52,22 @@ export const DECISIONES: { id: Decision; label: string; color: string }[] = [
   { id: 'RECUPERACION', label: 'Va a recuperación',             color: 'bg-amber-100 text-amber-800' },
   { id: 'RECUPERO',     label: 'Recuperó → promovido',          color: 'bg-teal-100 text-teal-800' },
   { id: 'NO_PROMOVIDO', label: 'No promovido (repite el año)',  color: 'bg-red-100 text-red-800' },
-  { id: 'RETIRADO',     label: 'Retirado / sin notas',          color: 'bg-slate-200 text-slate-700' },
+  { id: 'DESERTADO',    label: 'Desertado (dejó de asistir)',   color: 'bg-yellow-200 text-yellow-900' },
+  { id: 'RETIRADO',     label: 'Retirado',                      color: 'bg-slate-200 text-slate-700' },
 ];
 export const labelDecision = (d: Decision) => DECISIONES.find(x => x.id === d)?.label ?? d;
+
+/** Estado con las categorías del listado institucional (el que entregó primaria). */
+export type EstadoInstitucional = 'APROBADO' | 'CURSANDO' | 'REPROBADO' | 'DESERTADO' | 'RETIRADO';
+export function estadoInstitucional(d: Decision): EstadoInstitucional {
+  switch (d) {
+    case 'PROMOVIDO': case 'RECUPERO': return 'APROBADO';
+    case 'NO_PROMOVIDO': return 'REPROBADO';
+    case 'DESERTADO': return 'DESERTADO';
+    case 'RETIRADO': return 'RETIRADO';
+    default: return 'CURSANDO';   // va a recuperación o aún pendiente
+  }
+}
 
 export interface DecisionConsejo {
   id: string;           // `${corte}|${grupo}|${nombre}`
@@ -96,11 +109,31 @@ export const NOMBRE_AREA: Record<string, string> = {
   HLCI:   'Humanidades (Castellano e Idiomas)',
   INFOR:  'Informática y Tecnología',
   MAT:    'Matemáticas',
-  MOT:    'Ejes (MOT)',
-  RU:     'Ética y Religión (RU)',
+  MOT:    'Ejes Movilizadores',
+  RU:     'Ética y Religión',
   SOC:    'Ciencias Sociales',
 };
 export const nombreArea = (c: string) => NOMBRE_AREA[c] ?? c;
+
+// Nombres de las asignaturas según la asignación académica, el plan de
+// estudios y el listado de notas pendientes de primaria. Las que no se
+// pudieron confirmar se muestran con el código de la plataforma.
+export const NOMBRE_ASIGNATURA: Record<string, string> = {
+  NAT: 'Ciencias Naturales', PFQ: 'Proceso Físico-Químico', BIOLO: 'Biología', FISIC: 'Física',
+  QUIM: 'Química', QUYBI: 'Química y Biología',
+  ART: 'Artística', ART1: 'Artística', EMPR: 'Emprendimiento', EFIS: 'Educación Física',
+  'C TEX': 'Comprensión y Creación de Texto', 'L CAS': 'Lengua Castellana', LCAST: 'Lengua Castellana',
+  'L EXT': 'Inglés', LEXTR: 'Inglés', LCRIT: 'Lectura Crítica',
+  'I Y T': 'Informática y Tecnología',
+  MAT: 'Matemáticas', RESPR: 'Resolución de Problemas', 'E Y G': 'Estadística y Geometría',
+  GEOM: 'Geometría', EST: 'Estadística',
+  E2: 'Eje Deporte y Recreación', ECIYT: 'Eje Ciencia y Tecnología', ECLUB: 'Eje Club de Lectura',
+  EJARY: 'Eje Arte y Cultura', EJTUR: 'Eje Turismo', Ej: 'Eje Movilizador',
+  AFROC: 'Afrocolombianidad', ERyP: 'Ética y Religión', Raice: 'Raíces',
+  SOC: 'Ciencias Sociales', CCIU: 'Competencias Ciudadanas', GEOG: 'Geografía', HIST: 'Historia',
+  CYECO: 'Ciencias Económicas y Políticas', FIL: 'Filosofía', PPP: 'Proyecto Pedagógico Productivo',
+};
+export const nombreAsignatura = (c: string) => NOMBRE_ASIGNATURA[c] ?? c;
 
 // A qué área pertenece cada asignatura. Deducido de los propios
 // consolidados: la nota del área es el promedio ponderado (por
@@ -385,8 +418,28 @@ export function periodosIncompletos(grupo: GrupoConsejo): { area: string; period
   return res;
 }
 
-export function decisionSugerida(a: Analisis, corte: Corte, cfg: ConfigConsejo): Decision {
-  if (a.sinNingunaNota) return 'RETIRADO';
+/** Áreas que el docente SÍ calificó en el último período del grupo (al
+ *  menos la mitad del grupo tiene nota mayor que 0). Sirve para no
+ *  confundir "el docente no ha subido notas" con "el estudiante no vino". */
+export function areasCalificadasUltimoPeriodo(grupo: GrupoConsejo): { periodo: Corte; areas: string[] } {
+  const per = periodosDe(grupo);
+  const ult = per[per.length - 1];
+  const n = grupo.estudiantes.length;
+  const areas = grupo.areas.filter(a =>
+    grupo.estudiantes.filter(e => (e.areas[ult]?.[a] ?? 0) > 0).length >= n * 0.5);
+  return { periodo: ult, areas };
+}
+
+/** Posible desertor: en el último período no tiene nota (o tiene 0) en la
+ *  mitad o más de las áreas que el docente sí calificó al resto del grupo. */
+export function esPosibleDesertor(e: EstudianteConsejo, ult: { periodo: Corte; areas: string[] }): boolean {
+  if (ult.areas.length === 0) return false;
+  const vacias = ult.areas.filter(a => (e.areas[ult.periodo]?.[a] ?? 0) <= 0).length;
+  return vacias >= ult.areas.length * 0.5;
+}
+
+export function decisionSugerida(a: Analisis, corte: Corte, cfg: ConfigConsejo, desertor = false): Decision {
+  if (a.sinNingunaNota || desertor) return 'DESERTADO';
   if (a.perdidas.length === 0) return 'PROMOVIDO';
   if (corte === 'FINAL' && a.perdidas.length >= cfg.areasParaReprobar) return 'NO_PROMOVIDO';
   return 'RECUPERACION';

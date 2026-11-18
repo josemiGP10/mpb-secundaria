@@ -4,11 +4,12 @@ import { db } from '@/db/database';
 import { PRINT_CSS, abrirVentana, reportEncabezado } from '../reportes/ReportesView';
 import {
   CORTES, DECISIONES, periodosDe, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
-  decisionSugerida, guardarConfig, periodosIncompletos,
+  decisionSugerida, guardarConfig, periodosIncompletos, areasCalificadasUltimoPeriodo, esPosibleDesertor,
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
   type EstudianteConsejo, type GrupoConsejo,
 } from './consejoService';
+import { descargarListaExcel, htmlListas } from './listaEstados';
 
 const etiquetaCorte = (c: Corte) => (c === 'FINAL' ? 'Nota final del año' : `Período ${c.slice(2)}`);
 const esc = (s: string) => s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));
@@ -21,6 +22,7 @@ interface Fila {
   sugerida: Decision;
   retiradoDiario: boolean;     // figura como retirado en la matrícula del diario
   nombreDiario: string | null; // con qué nombre se encontró en la matrícula del diario
+  desertor: boolean;           // sin notas (o en 0) en la mayoría de áreas del último período
   guardada?: DecisionConsejo;
   decision: Decision;          // la guardada o, si no hay, la sugerida
 }
@@ -175,26 +177,34 @@ export function ConsejoView() {
 
   // Filas por grupo. Los retirados del diario se apartan (no salen en la
   // lista, el resumen ni el acta) salvo que se pida verlos.
-  const { filasPorGrupo, nRetiradosOcultos } = useMemo(() => {
+  // `todasPorGrupo` incluye a los retirados: el listado de estados los lleva
+  // (como en el de primaria), aunque en pantalla y en el acta se oculten.
+  const { filasPorGrupo, todasPorGrupo, nRetiradosOcultos } = useMemo(() => {
     const mapa = new Map<GrupoConsejo, Fila[]>();
+    const todas = new Map<GrupoConsejo, Fila[]>();
     let ocultos = 0;
-    if (!data) return { filasPorGrupo: mapa, nRetiradosOcultos: 0 };
+    if (!data) return { filasPorGrupo: mapa, todasPorGrupo: todas, nRetiradosOcultos: 0 };
     const dec = new Map((decisiones ?? []).map(d => [d.id, d]));
     for (const g of data.grupos) {
       if (grupoSel !== 'TODOS' && g.clave !== grupoSel) continue;
-      const filas: Fila[] = [];
+      const ult = areasCalificadasUltimoPeriodo(g);
+      const filas: Fila[] = [], completas: Fila[] = [];
       for (const est of g.estudiantes) {
         const enDiario = indiceDiario ? buscarEnDiario(est.nombre, indiceDiario.conjunto, indiceDiario.lista) : null;
         const retiradoDiario = !!enDiario && indiceDiario!.retirados.has(enDiario);
-        if (retiradoDiario && !mostrarRetirados) { ocultos++; continue; }
         const an = analizar(est, g, corte, cfg);
-        const sugerida = retiradoDiario ? 'RETIRADO' : decisionSugerida(an, corte, cfg);
+        const desertor = !retiradoDiario && esPosibleDesertor(est, ult);
+        const sugerida = retiradoDiario ? 'RETIRADO' : decisionSugerida(an, corte, cfg, desertor);
         const guardada = dec.get(idDecision(corte, g.clave, est.nombre));
-        filas.push({ grupo: g, est, an, sugerida, retiradoDiario, nombreDiario: enDiario, guardada, decision: guardada?.decision ?? sugerida });
+        const fila: Fila = { grupo: g, est, an, sugerida, retiradoDiario, desertor, nombreDiario: enDiario, guardada, decision: guardada?.decision ?? sugerida };
+        completas.push(fila);
+        if (retiradoDiario && !mostrarRetirados) { ocultos++; continue; }
+        filas.push(fila);
       }
       mapa.set(g, filas);
+      todas.set(g, completas);
     }
-    return { filasPorGrupo: mapa, nRetiradosOcultos: ocultos };
+    return { filasPorGrupo: mapa, todasPorGrupo: todas, nRetiradosOcultos: ocultos };
   }, [data, decisiones, grupoSel, corte, cfg, indiceDiario, mostrarRetirados]);
 
   const visibles = useMemo(() => {
@@ -405,6 +415,13 @@ export function ConsejoView() {
             className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Acta del consejo</button>
           <button onClick={() => imprimirRecuperaciones(filasPorGrupo, corte, cfg)}
             className="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-semibold shadow hover:bg-amber-600">🖨 Recuperaciones por área</button>
+          <button onClick={() => descargarListaExcel(todasPorGrupo, corte, cfg)}
+            title="Formato institucional (como el de primaria): APROBADO, CURSANDO, REPROBADO, DESERTADO, RETIRADO. Una hoja por grupo."
+            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow hover:bg-emerald-700">⬇ Listado de estados (Excel)</button>
+          <button onClick={() => abrirVentana('Listado de estados',
+              htmlListas(todasPorGrupo, corte, cfg, g => reportEncabezado(`Listado de estados — ${g.nombre}`, etiquetaCorte(corte), `Reprueba con ${cfg.areasParaReprobar} o más áreas perdidas`, false)),
+              PRINT_CSS + CSS_EXTRA)}
+            className="px-4 py-2 rounded-xl bg-white border border-emerald-600 text-emerald-700 text-xs font-semibold hover:bg-emerald-50">🖨 Listado de estados</button>
           <button onClick={aplicarSugeridas}
             className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50">
             ✓ Aplicar sugeridas a los pendientes
@@ -427,6 +444,12 @@ export function ConsejoView() {
                 {f.retiradoDiario && (
                   <span className="text-[10px] font-bold text-slate-700 bg-slate-200 rounded px-1.5 py-0.5"
                     title={`Retirado en la matrícula del Diario Pedagógico como: ${f.nombreDiario ?? ""}`}>Retirado en el diario{f.nombreDiario && f.nombreDiario !== f.est.nombre ? ` (${f.nombreDiario})` : ""}</span>
+                )}
+                {f.desertor && (
+                  <span className="text-[10px] font-bold text-yellow-900 bg-yellow-200 rounded px-1.5 py-0.5"
+                    title="En el último período no tiene nota (o tiene 0) en la mitad o más de las áreas que sí se calificaron al resto del grupo">
+                    Posible desertor
+                  </span>
                 )}
                 <button onClick={() => toggle(id)} className="flex-1 text-left text-sm font-semibold text-slate-800 min-w-[180px]">
                   {f.est.nombre} <span className="text-slate-400 text-xs font-normal">{abierto ? '▲' : '▼'}</span>
