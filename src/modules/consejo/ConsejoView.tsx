@@ -22,7 +22,8 @@ interface Fila {
   sugerida: Decision;
   retiradoDiario: boolean;     // figura como retirado en la matrícula del diario
   nombreDiario: string | null; // con qué nombre se encontró en la matrícula del diario
-  desertor: boolean;           // sin notas (o en 0) en la mayoría de áreas del último período
+  desertor: boolean;           // posible desertor (por notas del último período o por asistencia del diario)
+  motivoDesercion: string;     // por qué se marcó como posible desertor
   guardada?: DecisionConsejo;
   decision: Decision;          // la guardada o, si no hay, la sugerida
 }
@@ -166,12 +167,14 @@ export function ConsejoView() {
   );
 
   // Índice de la matrícula del diario (la misma de la lista de asistencia)
-  // para saber qué estudiantes de la plataforma están retirados.
+  // para saber qué estudiantes de la plataforma están retirados y cuáles
+  // dejaron de asistir según la asistencia registrada en el diario.
   const indiceDiario = useLiveQuery(async () => {
     const anio = new Date().getFullYear();
     const mats = await db.matriculas.where('anio').equals(anio).toArray();
     const ests = await db.estudiantes.bulkGet([...new Set(mats.map(m => m.estudiante_id))]);
-    return construirIndiceDiario(mats, new Map(ests.filter(e => !!e).map(e => [e!.id, e!])));
+    const asis = await db.registros_asistencia.where('matricula_id').anyOf(mats.map(m => m.id)).toArray();
+    return construirIndiceDiario(mats, new Map(ests.filter(e => !!e).map(e => [e!.id, e!])), asis);
   }, []);
 
   const cambiarCfg = (c: ConfigConsejo) => { setCfg(c); guardarConfig(c); };
@@ -194,10 +197,16 @@ export function ConsejoView() {
         const enDiario = indiceDiario ? buscarEnDiario(est.nombre, indiceDiario.conjunto, indiceDiario.lista) : null;
         const retiradoDiario = !!enDiario && indiceDiario!.retirados.has(enDiario);
         const an = analizar(est, g, corte, cfg);
-        const desertor = !retiradoDiario && esPosibleDesertor(est, ult);
+        const porNotas = esPosibleDesertor(est, ult);
+        const asis = enDiario ? indiceDiario?.inasistentes.get(enDiario) : undefined;
+        const desertor = !retiradoDiario && (porNotas || !!asis);
+        const motivoDesercion = [
+          porNotas ? `en el último período tiene 2.0 o menos (o sin nota) en la mitad o más de las áreas` : '',
+          asis ? `en las últimas 4 semanas del diario faltó a ${asis.fallas} de ${asis.total} clases` : '',
+        ].filter(Boolean).join('; ');
         const sugerida = retiradoDiario ? 'RETIRADO' : decisionSugerida(an, corte, cfg, desertor);
         const guardada = dec.get(idDecision(corte, g.clave, est.nombre));
-        const fila: Fila = { grupo: g, est, an, sugerida, retiradoDiario, desertor, nombreDiario: enDiario, guardada, decision: guardada ? normalizarDecision(guardada.decision) : sugerida };
+        const fila: Fila = { grupo: g, est, an, sugerida, retiradoDiario, desertor, motivoDesercion, nombreDiario: enDiario, guardada, decision: guardada ? normalizarDecision(guardada.decision) : sugerida };
         completas.push(fila);
         if (retiradoDiario && !mostrarRetirados) { ocultos++; continue; }
         filas.push(fila);
@@ -463,8 +472,8 @@ export function ConsejoView() {
                 )}
                 {f.desertor && (
                   <span className="text-[10px] font-bold text-yellow-900 bg-yellow-200 rounded px-1.5 py-0.5"
-                    title="En el último período no tiene nota (o tiene 0) en la mitad o más de las áreas que sí se calificaron al resto del grupo">
-                    Posible desertor
+                    title={`Posible desertor: ${f.motivoDesercion}`}>
+                    Posible desertor{f.motivoDesercion.includes("faltó") ? " (asistencia)" : " (notas)"}
                   </span>
                 )}
                 <button onClick={() => toggle(id)} className="flex-1 text-left text-sm font-semibold text-slate-800 min-w-[180px]">

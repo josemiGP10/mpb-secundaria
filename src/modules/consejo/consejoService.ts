@@ -215,7 +215,15 @@ export interface IndiceDiario {
   conjunto: Set<string>;     // todos los nombres del diario (normalizados)
   lista: string[];
   retirados: Set<string>;    // nombres de estudiantes retirados
+  /** Estudiantes que en las últimas semanas casi no asisten, según la lista
+   *  de asistencia del diario: nombre → fallas / clases registradas. */
+  inasistentes: Map<string, { fallas: number; total: number }>;
 }
+
+/** Ventana y umbral para "dejó de asistir" según la asistencia del diario. */
+const DIAS_VENTANA_ASISTENCIA = 28;
+const MIN_CLASES_VENTANA = 4;
+const PROPORCION_FALLAS = 0.8;
 
 /** Índice de estudiantes del diario con su estado, con la MISMA regla de
  *  la lista de asistencia: dentro de un grupo, si hay copias duplicadas y
@@ -223,27 +231,61 @@ export interface IndiceDiario {
  *  cuenta como retirado si lo está en TODOS sus grupos (si pasó de 7° a
  *  MEF y sigue activo allá, no está retirado). */
 export function construirIndiceDiario(
-  matriculas: { estudiante_id: string; grupo_id: string; activo: boolean }[],
+  matriculas: { id?: string; estudiante_id: string; grupo_id: string; activo: boolean }[],
   estudiantes: Map<string, { tipo_doc: string; doc: string; apellido1: string; apellido2: string; nombre1: string; nombre2: string }>,
+  asistencia: { matricula_id: string; fecha: string; estado: string; asignatura_id?: string; hora_bloque?: number }[] = [],
 ): IndiceDiario {
-  const porDoc = new Map<string, { nombres: Set<string>; grupos: Map<string, boolean> }>();
+  const porDoc = new Map<string, { nombres: Set<string>; grupos: Map<string, boolean>; fallas: number; total: number }>();
+  const docDeMatricula = new Map<string, string>();
   for (const m of matriculas) {
     const e = estudiantes.get(m.estudiante_id);
     if (!e) continue;
     const doc = `${e.tipo_doc}-${String(e.doc).replace(/_mef$/i, '')}`;
-    if (!porDoc.has(doc)) porDoc.set(doc, { nombres: new Set(), grupos: new Map() });
+    if (!porDoc.has(doc)) porDoc.set(doc, { nombres: new Set(), grupos: new Map(), fallas: 0, total: 0 });
     const x = porDoc.get(doc)!;
     x.nombres.add(normalizarNombre([e.apellido1, e.apellido2, e.nombre1, e.nombre2].filter(Boolean).join(' ')));
     x.grupos.set(m.grupo_id, (x.grupos.get(m.grupo_id) ?? false) || m.activo === false);
+    if (m.id) docDeMatricula.set(m.id, doc);
   }
+
+  // Asistencia de las últimas semanas (respecto al último día registrado).
+  // Falla = FI (injustificada) o A (abandono). Las copias duplicadas de un
+  // estudiante se suman por documento.
+  if (asistencia.length) {
+    const ultima = asistencia.reduce((mx, r) => (r.fecha > mx ? r.fecha : mx), '').slice(0, 10);
+    const d = new Date(ultima + 'T00:00:00'); d.setDate(d.getDate() - DIAS_VENTANA_ASISTENCIA);
+    const desde = d.toISOString().slice(0, 10);
+    const vistos = new Set<string>();
+    for (const r of asistencia) {
+      const f = r.fecha.slice(0, 10);
+      if (f < desde) continue;
+      const doc = docDeMatricula.get(r.matricula_id);
+      if (!doc) continue;
+      // Una sola marca por estudiante, día, asignatura y bloque: así no se cuentan
+      // dos veces las copias duplicadas, pero sí dos clases distintas del mismo día.
+      const k = `${doc}|${f}|${r.asignatura_id ?? ''}|${r.hora_bloque ?? ''}`;
+      if (vistos.has(k)) continue;
+      vistos.add(k);
+      const x = porDoc.get(doc)!;
+      x.total++;
+      if (r.estado === 'FI' || r.estado === 'A') x.fallas++;
+    }
+  }
+
   const conjunto = new Set<string>(), retirados = new Set<string>(), activos = new Set<string>();
-  for (const { nombres, grupos } of porDoc.values()) {
+  const inasistentes = new Map<string, { fallas: number; total: number }>();
+  for (const { nombres, grupos, fallas, total } of porDoc.values()) {
     const retirado = [...grupos.values()].every(Boolean);
-    for (const n of nombres) { conjunto.add(n); (retirado ? retirados : activos).add(n); }
+    const noAsiste = total >= MIN_CLASES_VENTANA && fallas / total >= PROPORCION_FALLAS;
+    for (const n of nombres) {
+      conjunto.add(n);
+      (retirado ? retirados : activos).add(n);
+      if (noAsiste) inasistentes.set(n, { fallas, total });
+    }
   }
   // Un mismo nombre con un documento activo y otro retirado: se toma activo
   for (const n of activos) retirados.delete(n);
-  return { conjunto, lista: [...conjunto], retirados };
+  return { conjunto, lista: [...conjunto], retirados, inasistentes };
 }
 
 /** Distancia de edición entre dos nombres; "?" (letra dañada) no cuenta. */
@@ -461,11 +503,17 @@ export function areasCalificadasUltimoPeriodo(grupo: GrupoConsejo): { periodo: C
   return { periodo: ult, areas };
 }
 
-/** Posible desertor: en el último período no tiene nota (o tiene 0) en la
- *  mitad o más de las áreas que el docente sí calificó al resto del grupo. */
+/** Nota con la que los docentes suelen registrar a quien ya no asiste
+ *  (en vez de dejar la casilla vacía ponen 1.0). */
+export const NOTA_DESERCION = 2.0;
+
+/** Posible desertor por notas: en el último período tiene nota de 2.0 o
+ *  menos (o no tiene) en la mitad o más de las áreas que el docente sí
+ *  calificó al resto del grupo. Un estudiante que venía con notas normales
+ *  y de pronto queda en 1.0 en casi todo, dejó de asistir. */
 export function esPosibleDesertor(e: EstudianteConsejo, ult: { periodo: Corte; areas: string[] }): boolean {
   if (ult.areas.length === 0) return false;
-  const vacias = ult.areas.filter(a => (e.areas[ult.periodo]?.[a] ?? 0) <= 0).length;
+  const vacias = ult.areas.filter(a => (e.areas[ult.periodo]?.[a] ?? 0) <= NOTA_DESERCION).length;
   return vacias >= ult.areas.length * 0.5;
 }
 
