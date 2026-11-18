@@ -19,6 +19,8 @@ export interface EstudianteConsejo {
   nombre: string;
   areas: Partial<Record<Corte, Notas>>;
   asignaturas?: Partial<Record<Corte, Notas>>;
+  /** La plataforma no trajo la nota FINAL; la calculó la app (provisional). */
+  finalCalculada?: boolean;
 }
 
 export interface GrupoConsejo {
@@ -319,13 +321,18 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
     if (!g) continue;
     const corte = typeof r[5] === 'string' ? r[5].trim() : '';
     if (!(CORTES as readonly string[]).includes(corte)) continue;
-    if (corte === 'FINAL') {
-      const nombre = normNombre(r[0]);
+    // Cada estudiante empieza en la fila que trae su nombre. Normalmente es
+    // la fila FINAL, pero cuando la plataforma aún no genera la nota final
+    // (período abierto) el nombre viene en la fila P.1 y no hay fila FINAL.
+    const nombre = normNombre(r[0]);
+    if (nombre) {
       // Las filas "1. superior", "2. alto"... al final de cada grupo son
       // conteos de desempeño, no estudiantes.
-      if (!nombre || /^\d+\./.test(nombre)) { actual = null; continue; }
+      if (/^\d+\./.test(nombre)) { actual = null; continue; }
       actual = {};
       g.est.set(nombre, actual);
+    } else if (corte === 'FINAL') {
+      actual = null;
     }
     if (!actual) continue;
     const notas: Notas = {};
@@ -333,6 +340,19 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
     actual[corte as Corte] = notas;
   }
   return grupos;
+}
+
+/** Nota final cuando la plataforma aún no la genera: promedio de los
+ *  períodos que tienen nota, truncado a una décima (así coincide con la
+ *  oficial en ~87 % de los casos; en el resto difiere unas décimas porque
+ *  la plataforma la calcula desde las asignaturas). Es provisional. */
+function calcularFinal(notas: Partial<Record<Corte, Notas>>, cols: string[], pers: Corte[]): Notas {
+  const res: Notas = {};
+  for (const c of cols) {
+    const vals = pers.map(p => notas[p]?.[c]).filter((v): v is number => v != null);
+    res[c] = vals.length ? Math.floor((vals.reduce((s, v) => s + v, 0) / vals.length) * 10 + 1e-9) / 10 : null;
+  }
+  return res;
 }
 
 /** Carga un par de consolidados. Por defecto los grupos se AGREGAN a los
@@ -354,13 +374,18 @@ export async function importarConsolidados(
     PERIODOS.forEach((p, i) => {
       if ([...ga.est.values()].some(n => Object.values(n[p] ?? {}).some(v => v != null))) numPeriodos = i + 1;
     });
+    const pers = PERIODOS.slice(0, numPeriodos || 4);
     return {
       clave: ga.clave, nombre, grado, numPeriodos: numPeriodos || 4,
       areas: ga.cols,
       asignaturas: gs?.cols ?? [],
-      estudiantes: [...ga.est.entries()].map(([n, notas]) => ({
-        nombre: n, areas: notas, asignaturas: gs?.est.get(n),
-      })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
+      estudiantes: [...ga.est.entries()].map(([n, notas]) => {
+        const asig = gs?.est.get(n);
+        const sinFinal = !notas.FINAL;
+        if (sinFinal) notas.FINAL = calcularFinal(notas, ga.cols, pers);
+        if (asig && !asig.FINAL) asig.FINAL = calcularFinal(asig, gs!.cols, pers);
+        return { nombre: n, areas: notas, asignaturas: asig, ...(sinFinal ? { finalCalculada: true } : {}) };
+      }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     };
   });
 

@@ -94,6 +94,7 @@ function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cf
     ) +
       tablaResumen(filasPorGrupo, cfg) + detalle +
       (retiradosOcultos > 0 ? `<p style="margin-top:14px;font-size:9px;color:#555">No se incluyen ${retiradosOcultos} estudiantes que figuran como retirados en la matrícula del diario.</p>` : "") +
+      ([...filasPorGrupo.keys()].some(g => g.estudiantes.some(e => e.finalCalculada)) && corte === "FINAL" ? `<p style="margin-top:14px;font-size:9px;color:#555">Nota final provisional (calculada por la app, la plataforma aún no la genera) en: ${[...filasPorGrupo.keys()].filter(g => g.estudiantes.some(e => e.finalCalculada)).map(g => esc(g.nombre)).join(", ")}.</p>` : "") +
       `<p style="margin-top:6px;font-size:9px;color:#555">* Nota final calculada con algún período sin nota en la plataforma (puede cambiar).</p>` +
       `<p style="margin-top:4px;font-size:9px;color:#555">Convenciones:${[...new Set([...filasPorGrupo.keys()].flatMap(g => g.areas))].map(a => `${esc(a)} = ${esc(nombreArea(a))}`).join(' · ')}</p>` +
       `<div class="firmas"><div>Rector(a)</div><div>Coordinador(a)</div><div>Secretario(a) del consejo</div><div>Docente</div><div>Docente</div><div>Docente</div></div>`,
@@ -367,6 +368,21 @@ export function ConsejoView() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+        {/* Aviso: la plataforma no trajo la nota FINAL en algunos grupos */}
+        {(() => {
+          const calc = [...filasPorGrupo.keys()].filter(g => g.estudiantes.some(e => e.finalCalculada)).map(g => g.nombre);
+          return corte === 'FINAL' && calc.length > 0 && (
+            <div className="rounded-xl bg-blue-50 border border-blue-300 px-3 py-2 text-xs text-blue-900">
+              <b>ℹ Nota final provisional en:</b> {calc.join(' · ')}.
+              <span className="block text-blue-700 mt-0.5">
+                La plataforma aún no generó la nota final de esos grupos (período abierto). La app la calculó como promedio
+                de los períodos; casi siempre coincide, pero puede diferir unas décimas. Cuando la plataforma la genere,
+                vuelva a cargar el consolidado.
+              </span>
+            </div>
+          );
+        })()}
+
         {/* Aviso: notas de período que faltan en la plataforma */}
         {(() => {
           const faltantes = [...filasPorGrupo.keys()].flatMap(g =>
