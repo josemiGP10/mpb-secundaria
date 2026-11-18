@@ -506,6 +506,14 @@ export function ConsejoView() {
                   {DECISIONES.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
                 </select>
                 {!f.guardada && <span className="text-[10px] text-slate-400">sugerida — aún sin confirmar</span>}
+                {f.guardada && f.decision !== f.sugerida && (
+                  <span className="text-[10px] text-violet-800 bg-violet-100 rounded px-1.5 py-0.5 flex items-center gap-1.5">
+                    Decisión del consejo · la regla indicaba: <b>{labelDecision(f.sugerida)}</b>
+                    <button
+                      onClick={() => guardarDecision(corte, f.grupo.clave, f.est.nombre, { decision: f.sugerida })}
+                      className="underline text-violet-700 hover:text-violet-900">Volver a la sugerida</button>
+                  </span>
+                )}
                 <ObservacionInput
                   valor={f.guardada?.observacion ?? ''}
                   onGuardar={v => guardarDecision(corte, f.grupo.clave, f.est.nombre, { observacion: v, decision: f.decision })} />

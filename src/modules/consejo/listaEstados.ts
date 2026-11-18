@@ -19,10 +19,28 @@ export interface EntradaLista {
   an: Analisis;
   decision: Decision;
   guardada?: DecisionConsejo;
+  sugerida?: Decision;          // lo que indicaba la regla
+  retiradoDiario?: boolean;
+  motivoDesercion?: string;
 }
 
 interface AreaListada { area: string; nombre: string; nota: number; asigs: { nombre: string; nota: number }[] }
-export interface FilaLista { nombre: string; estado: EstadoInstitucional; areas: AreaListada[] }
+export interface FilaLista { nombre: string; estado: EstadoInstitucional; areas: AreaListada[]; observacion: string }
+
+/** Observación para el listado: por qué está retirado/desertado, si el
+ *  consejo decidió distinto a la regla, y la observación escrita. */
+function observacion(x: EntradaLista, estado: EstadoInstitucional): string {
+  const partes: string[] = [];
+  if (estado === 'RETIRADO') {
+    if (x.retiradoDiario) partes.push('Retirado en la matrícula');
+    else if (x.motivoDesercion) partes.push(x.motivoDesercion.includes('faltó') ? 'Dejó de asistir (asistencia del diario)' : 'Dejó de asistir (sin notas o 1.0 en el último período)');
+  }
+  if (x.guardada && x.sugerida && estadoInstitucional(x.sugerida) !== estado) {
+    partes.push(`Decisión del consejo (la regla indicaba ${TEXTO_ESTADO[estadoInstitucional(x.sugerida)]})`);
+  }
+  if (x.guardada?.observacion?.trim()) partes.push(x.guardada.observacion.trim());
+  return partes.join('. ');
+}
 
 export const ESTADOS: EstadoInstitucional[] = ['APROBADO', 'CURSANDO', 'REPROBADO', 'RETIRADO'];
 
@@ -38,6 +56,7 @@ function construirFila(x: EntradaLista, corte: Corte, cfg: ConfigConsejo): FilaL
   return {
     nombre: x.est.nombre,
     estado,
+    observacion: observacion(x, estado),
     areas: x.an.perdidas.filter(p => areas.includes(p.area)).map(p => ({
       area: p.area,
       nombre: nombreArea(p.area),
@@ -67,12 +86,12 @@ function hojaGrupo(g: GrupoConsejo, filas: FilaLista[], anio: number): Hoja {
   const put = (r: number, c: number, v: Celda['v'], s: number) => celdas.push({ r, c, v, s });
 
   put(0, 0, `I.E. RURAL MIGUEL PINEDO BARROS — ${anio}`, ESTILO.titulo);
-  for (let c = 1; c < 7; c++) put(0, c, null, ESTILO.titulo);
-  combinadas.push('A1:G1');
+  for (let c = 1; c < 8; c++) put(0, c, null, ESTILO.titulo);
+  combinadas.push('A1:H1');
   put(1, 0, TITULO_GRUPO(g), ESTILO.titulo);
-  for (let c = 1; c < 7; c++) put(1, c, null, ESTILO.titulo);
-  combinadas.push('A2:G2');
-  ['#', 'APELLIDOS Y NOMBRES', 'ESTADO', 'ÁREA', 'NOTA', 'ASIGNATURA', 'NOTA']
+  for (let c = 1; c < 8; c++) put(1, c, null, ESTILO.titulo);
+  combinadas.push('A2:H2');
+  ['#', 'APELLIDOS Y NOMBRES', 'ESTADO', 'ÁREA', 'NOTA', 'ASIGNATURA', 'NOTA', 'OBSERVACIÓN']
     .forEach((h, c) => put(2, c, h, ESTILO.encabezado));
 
   let r = 3;
@@ -86,8 +105,9 @@ function hojaGrupo(g: GrupoConsejo, filas: FilaLista[], anio: number): Hoja {
       put(r + k, 0, k === 0 ? i + 1 : null, ESTILO.centro);
       put(r + k, 1, k === 0 ? f.nombre : null, sNombre);
       put(r + k, 2, k === 0 ? TEXTO_ESTADO[f.estado] : null, sEstado);
+      put(r + k, 7, k === 0 ? f.observacion || null : null, ESTILO.texto);
     }
-    if (alto > 1) for (const c of [0, 1, 2]) combinadas.push(`${ref(r, c)}:${ref(r + alto - 1, c)}`);
+    if (alto > 1) for (const c of [0, 1, 2, 7]) combinadas.push(`${ref(r, c)}:${ref(r + alto - 1, c)}`);
 
     if (f.areas.length === 0) {
       for (const c of [3, 4, 5, 6]) put(r, c, null, ESTILO.texto);
@@ -107,7 +127,7 @@ function hojaGrupo(g: GrupoConsejo, filas: FilaLista[], anio: number): Hoja {
     });
     r += alto;
   });
-  return { nombre: g.nombre, celdas, combinadas, anchos: [5, 42, 21, 28, 7, 34, 7] };
+  return { nombre: g.nombre, celdas, combinadas, anchos: [5, 42, 21, 28, 7, 34, 7, 44] };
 }
 
 function hojaResumen(listas: ReturnType<typeof construirListas>, corte: Corte, cfg: ConfigConsejo, anio: number): Hoja {
@@ -162,14 +182,16 @@ export function htmlListas(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: C
       const cab = `<td class="num" rowspan="${alto}">${i + 1}</td>
         <td rowspan="${alto}" style="background:${COLOR[f.estado]}">${escHtml(f.nombre)}</td>
         <td class="c" rowspan="${alto}" style="background:${COLOR[f.estado]};font-weight:bold">${TEXTO_ESTADO[f.estado]}</td>`;
-      if (f.areas.length === 0) return `<tr>${cab}<td></td><td></td><td></td><td></td></tr>`;
+      const obs = `<td rowspan="${alto}" style="font-size:9px;color:#333">${escHtml(f.observacion)}</td>`;
+      if (f.areas.length === 0) return `<tr>${cab}<td></td><td></td><td></td><td></td>${obs}</tr>`;
       const trs: string[] = [];
       f.areas.forEach((a, j) => {
         const n = bloques[j];
         for (let k = 0; k < n; k++) {
           const s = a.asigs[k];
-          trs.push(`<tr>${trs.length === 0 ? cab : ''}${k === 0 ? `<td rowspan="${n}">${escHtml(a.nombre)}</td><td class="c perd" rowspan="${n}">${a.nota.toFixed(1)}</td>` : ''}
-            <td>${s ? escHtml(s.nombre) : ''}</td><td class="c perd">${s ? s.nota.toFixed(1) : ''}</td></tr>`);
+          const primera = trs.length === 0;
+          trs.push(`<tr>${primera ? cab : ''}${k === 0 ? `<td rowspan="${n}">${escHtml(a.nombre)}</td><td class="c perd" rowspan="${n}">${a.nota.toFixed(1)}</td>` : ''}
+            <td>${s ? escHtml(s.nombre) : ''}</td><td class="c perd">${s ? s.nota.toFixed(1) : ''}</td>${primera ? obs : ''}</tr>`);
         }
       });
       return trs.join('');
@@ -177,7 +199,7 @@ export function htmlListas(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: C
     const conteo = ESTADOS.map(e => `${TEXTO_ESTADO[e]}: ${filas.filter(f => f.estado === e).length}`).join(' · ');
     return `<div class="${idx > 0 ? 'pg' : ''}">
       ${encabezado(grupo)}
-      <table><thead><tr><th class="num">#</th><th>Apellidos y nombres</th><th>Estado</th><th>Área</th><th>Nota</th><th>Asignatura</th><th>Nota</th></tr></thead>
+      <table><thead><tr><th class="num">#</th><th>Apellidos y nombres</th><th>Estado</th><th>Área</th><th>Nota</th><th>Asignatura</th><th>Nota</th><th>Observación</th></tr></thead>
       <tbody>${cuerpo}</tbody></table>
       <p style="margin-top:6px;font-size:9px;color:#444">${conteo}</p>
     </div>`;
