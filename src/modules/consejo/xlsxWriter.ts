@@ -15,8 +15,8 @@ export const ESTILO = {
   numero: 4,          // 0.0 centrado
   centro: 5,          // entero / texto centrado
   // Estado (centrado) y nombre (alineado a la izquierda) con el color del estado
-  APROBADO: 6, CURSANDO: 7, REPROBADO: 8, DESERTADO: 9, RETIRADO: 10,
-  nAPROBADO: 11, nCURSANDO: 12, nREPROBADO: 13, nDESERTADO: 14, nRETIRADO: 15,
+  APROBADO: 6, CURSANDO: 7, REPROBADO: 8, RETIRADO: 9,      // RETIRADO = desertado o retirado (amarillo)
+  nAPROBADO: 11, nCURSANDO: 12, nREPROBADO: 13, nRETIRADO: 14,
   numeroRojo: 16,     // nota perdida
 } as const;
 

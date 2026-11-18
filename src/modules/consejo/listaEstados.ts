@@ -7,7 +7,7 @@
 // ============================================================
 
 import {
-  areasARecuperar, asignaturasDeArea, estadoInstitucional, nombreArea, nombreAsignatura,
+  areasARecuperar, asignaturasDeArea, estadoInstitucional, nombreArea, nombreAsignatura, TEXTO_ESTADO,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
   type EstadoInstitucional, type EstudianteConsejo, type GrupoConsejo,
 } from './consejoService';
@@ -24,7 +24,7 @@ export interface EntradaLista {
 interface AreaListada { area: string; nombre: string; nota: number; asigs: { nombre: string; nota: number }[] }
 export interface FilaLista { nombre: string; estado: EstadoInstitucional; areas: AreaListada[] }
 
-export const ESTADOS: EstadoInstitucional[] = ['APROBADO', 'CURSANDO', 'REPROBADO', 'DESERTADO', 'RETIRADO'];
+export const ESTADOS: EstadoInstitucional[] = ['APROBADO', 'CURSANDO', 'REPROBADO', 'RETIRADO'];
 
 function construirFila(x: EntradaLista, corte: Corte, cfg: ConfigConsejo): FilaLista {
   const estado = estadoInstitucional(x.decision);
@@ -85,7 +85,7 @@ function hojaGrupo(g: GrupoConsejo, filas: FilaLista[], anio: number): Hoja {
     for (let k = 0; k < alto; k++) {
       put(r + k, 0, k === 0 ? i + 1 : null, ESTILO.centro);
       put(r + k, 1, k === 0 ? f.nombre : null, sNombre);
-      put(r + k, 2, k === 0 ? f.estado : null, sEstado);
+      put(r + k, 2, k === 0 ? TEXTO_ESTADO[f.estado] : null, sEstado);
     }
     if (alto > 1) for (const c of [0, 1, 2]) combinadas.push(`${ref(r, c)}:${ref(r + alto - 1, c)}`);
 
@@ -107,7 +107,7 @@ function hojaGrupo(g: GrupoConsejo, filas: FilaLista[], anio: number): Hoja {
     });
     r += alto;
   });
-  return { nombre: g.nombre, celdas, combinadas, anchos: [5, 42, 14, 28, 7, 34, 7] };
+  return { nombre: g.nombre, celdas, combinadas, anchos: [5, 42, 21, 28, 7, 34, 7] };
 }
 
 function hojaResumen(listas: ReturnType<typeof construirListas>, corte: Corte, cfg: ConfigConsejo, anio: number): Hoja {
@@ -116,7 +116,7 @@ function hojaResumen(listas: ReturnType<typeof construirListas>, corte: Corte, c
   put(0, 0, `I.E. RURAL MIGUEL PINEDO BARROS — CONSEJO ACADÉMICO ${anio}`, ESTILO.titulo);
   for (let c = 1; c < 7; c++) put(0, c, null, ESTILO.titulo);
   put(1, 0, `Resumen de estados · ${corte === 'FINAL' ? 'Nota final' : corte} · Área perdida: nota < ${cfg.notaMinima.toFixed(1)} · Reprueba con ${cfg.areasParaReprobar} o más áreas`, ESTILO.normal);
-  ['GRUPO', ...ESTADOS, 'TOTAL'].forEach((h, c) => put(3, c, h, h === 'GRUPO' || h === 'TOTAL' ? ESTILO.encabezado : ESTILO[h as EstadoInstitucional]));
+  ['GRUPO', ...ESTADOS, 'TOTAL'].forEach((h, c) => put(3, c, h === 'GRUPO' || h === 'TOTAL' ? h : TEXTO_ESTADO[h as EstadoInstitucional], h === 'GRUPO' || h === 'TOTAL' ? ESTILO.encabezado : ESTILO[h as EstadoInstitucional]));
   const tot = Object.fromEntries(ESTADOS.map(e => [e, 0])) as Record<EstadoInstitucional, number>;
   listas.forEach((l, i) => {
     put(4 + i, 0, l.grupo.nombre, ESTILO.texto);
@@ -131,8 +131,8 @@ function hojaResumen(listas: ReturnType<typeof construirListas>, corte: Corte, c
   put(rt, 0, 'TOTAL', ESTILO.encabezado);
   ESTADOS.forEach((e, j) => put(rt, j + 1, tot[e], ESTILO.encabezado));
   put(rt, ESTADOS.length + 1, Object.values(tot).reduce((s, n) => s + n, 0), ESTILO.encabezado);
-  put(rt + 2, 0, 'APROBADO: promovido o recuperó · CURSANDO: va a recuperación (o pendiente) · REPROBADO: no promovido · DESERTADO: dejó de asistir · RETIRADO: retiro en la matrícula', ESTILO.normal);
-  return { nombre: 'RESUMEN', celdas, combinadas: ['A1:G1'], anchos: [16, 12, 12, 12, 12, 12, 10] };
+  put(rt + 2, 0, 'APROBADO: promovido o recuperó · CURSANDO: va a recuperación (o pendiente) · REPROBADO: no promovido · DESERTADO/RETIRADO: dejó de asistir o tiene retiro en la matrícula', ESTILO.normal);
+  return { nombre: 'RESUMEN', celdas, combinadas: ['A1:G1'], anchos: [16, 12, 12, 12, 21, 10] };
 }
 
 export function generarListaXlsx(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: Corte, cfg: ConfigConsejo): Blob {
@@ -150,7 +150,7 @@ export function descargarListaExcel(porGrupo: Map<GrupoConsejo, EntradaLista[]>,
 // ── Impresión (misma tabla, una hoja carta por grupo) ───────
 
 const COLOR: Record<EstadoInstitucional, string> = {
-  APROBADO: '#c6efce', CURSANDO: '#ffd9a0', REPROBADO: '#ffa7a7', DESERTADO: '#ffff00', RETIRADO: '#d9d9d9',
+  APROBADO: '#c6efce', CURSANDO: '#ffd9a0', REPROBADO: '#ffa7a7', RETIRADO: '#ffff00',
 };
 const escHtml = (s: string) => s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));
 
@@ -161,7 +161,7 @@ export function htmlListas(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: C
       const alto = Math.max(1, bloques.reduce((s, n) => s + n, 0));
       const cab = `<td class="num" rowspan="${alto}">${i + 1}</td>
         <td rowspan="${alto}" style="background:${COLOR[f.estado]}">${escHtml(f.nombre)}</td>
-        <td class="c" rowspan="${alto}" style="background:${COLOR[f.estado]};font-weight:bold">${f.estado}</td>`;
+        <td class="c" rowspan="${alto}" style="background:${COLOR[f.estado]};font-weight:bold">${TEXTO_ESTADO[f.estado]}</td>`;
       if (f.areas.length === 0) return `<tr>${cab}<td></td><td></td><td></td><td></td></tr>`;
       const trs: string[] = [];
       f.areas.forEach((a, j) => {
@@ -174,7 +174,7 @@ export function htmlListas(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: C
       });
       return trs.join('');
     }).join('');
-    const conteo = ESTADOS.map(e => `${e}: ${filas.filter(f => f.estado === e).length}`).join(' · ');
+    const conteo = ESTADOS.map(e => `${TEXTO_ESTADO[e]}: ${filas.filter(f => f.estado === e).length}`).join(' · ');
     return `<div class="${idx > 0 ? 'pg' : ''}">
       ${encabezado(grupo)}
       <table><thead><tr><th class="num">#</th><th>Apellidos y nombres</th><th>Estado</th><th>Área</th><th>Nota</th><th>Asignatura</th><th>Nota</th></tr></thead>

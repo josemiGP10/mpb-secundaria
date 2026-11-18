@@ -43,8 +43,12 @@ export interface ImportConsejo {
   grupos: GrupoConsejo[];
 }
 
+// 'DESERTADO' existió como decisión aparte; ahora desertado y retirado son
+// una sola categoría ('RETIRADO'). Se conserva en el tipo solo para leer
+// decisiones guardadas antes del cambio (ver normalizarDecision).
 export type Decision =
   | 'PENDIENTE' | 'PROMOVIDO' | 'RECUPERACION' | 'RECUPERO' | 'NO_PROMOVIDO' | 'DESERTADO' | 'RETIRADO';
+export const normalizarDecision = (d: Decision): Decision => (d === 'DESERTADO' ? 'RETIRADO' : d);
 
 export const DECISIONES: { id: Decision; label: string; color: string }[] = [
   { id: 'PENDIENTE',    label: 'Pendiente',                     color: 'bg-slate-100 text-slate-600' },
@@ -52,18 +56,20 @@ export const DECISIONES: { id: Decision; label: string; color: string }[] = [
   { id: 'RECUPERACION', label: 'Va a recuperación',             color: 'bg-amber-100 text-amber-800' },
   { id: 'RECUPERO',     label: 'Recuperó → promovido',          color: 'bg-teal-100 text-teal-800' },
   { id: 'NO_PROMOVIDO', label: 'No promovido (repite el año)',  color: 'bg-red-100 text-red-800' },
-  { id: 'DESERTADO',    label: 'Desertado (dejó de asistir)',   color: 'bg-yellow-200 text-yellow-900' },
-  { id: 'RETIRADO',     label: 'Retirado',                      color: 'bg-slate-200 text-slate-700' },
+  { id: 'RETIRADO',     label: 'Desertado / retirado',          color: 'bg-yellow-200 text-yellow-900' },
 ];
-export const labelDecision = (d: Decision) => DECISIONES.find(x => x.id === d)?.label ?? d;
+export const labelDecision = (d: Decision) => DECISIONES.find(x => x.id === normalizarDecision(d))?.label ?? d;
 
-/** Estado con las categorías del listado institucional (el que entregó primaria). */
-export type EstadoInstitucional = 'APROBADO' | 'CURSANDO' | 'REPROBADO' | 'DESERTADO' | 'RETIRADO';
+/** Estado con las categorías del listado institucional (el que entregó
+ *  primaria). Desertado y retirado van juntos en una sola categoría. */
+export type EstadoInstitucional = 'APROBADO' | 'CURSANDO' | 'REPROBADO' | 'RETIRADO';
+export const TEXTO_ESTADO: Record<EstadoInstitucional, string> = {
+  APROBADO: 'APROBADO', CURSANDO: 'CURSANDO', REPROBADO: 'REPROBADO', RETIRADO: 'DESERTADO/RETIRADO',
+};
 export function estadoInstitucional(d: Decision): EstadoInstitucional {
-  switch (d) {
+  switch (normalizarDecision(d)) {
     case 'PROMOVIDO': case 'RECUPERO': return 'APROBADO';
     case 'NO_PROMOVIDO': return 'REPROBADO';
-    case 'DESERTADO': return 'DESERTADO';
     case 'RETIRADO': return 'RETIRADO';
     default: return 'CURSANDO';   // va a recuperación o aún pendiente
   }
@@ -122,7 +128,7 @@ export const NOMBRE_ASIGNATURA: Record<string, string> = {
   NAT: 'Ciencias Naturales', PFQ: 'Proceso Físico-Químico', BIOLO: 'Biología', FISIC: 'Física',
   QUIM: 'Química', QUYBI: 'Química y Biología',
   ART: 'Artística', ART1: 'Artística', EMPR: 'Emprendimiento', EFIS: 'Educación Física',
-  'C TEX': 'Comprensión y Creación de Texto', 'L CAS': 'Lengua Castellana', LCAST: 'Lengua Castellana',
+  'C TEX': 'Comprensión y Creación de Texto', 'OR CA': 'Ortografía', 'L CAS': 'Lengua Castellana', LCAST: 'Lengua Castellana',
   'L EXT': 'Inglés', LEXTR: 'Inglés', LCRIT: 'Lectura Crítica',
   'I Y T': 'Informática y Tecnología',
   MAT: 'Matemáticas', RESPR: 'Resolución de Problemas', 'E Y G': 'Estadística y Geometría',
@@ -439,7 +445,7 @@ export function esPosibleDesertor(e: EstudianteConsejo, ult: { periodo: Corte; a
 }
 
 export function decisionSugerida(a: Analisis, corte: Corte, cfg: ConfigConsejo, desertor = false): Decision {
-  if (a.sinNingunaNota || desertor) return 'DESERTADO';
+  if (a.sinNingunaNota || desertor) return 'RETIRADO';
   if (a.perdidas.length === 0) return 'PROMOVIDO';
   if (corte === 'FINAL' && a.perdidas.length >= cfg.areasParaReprobar) return 'NO_PROMOVIDO';
   return 'RECUPERACION';

@@ -4,7 +4,7 @@ import { db } from '@/db/database';
 import { PRINT_CSS, abrirVentana, reportEncabezado } from '../reportes/ReportesView';
 import {
   CORTES, DECISIONES, periodosDe, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
-  decisionSugerida, guardarConfig, periodosIncompletos, areasCalificadasUltimoPeriodo, esPosibleDesertor,
+  decisionSugerida, guardarConfig, periodosIncompletos, areasCalificadasUltimoPeriodo, esPosibleDesertor, normalizarDecision,
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
   type EstudianteConsejo, type GrupoConsejo,
@@ -196,7 +196,7 @@ export function ConsejoView() {
         const desertor = !retiradoDiario && esPosibleDesertor(est, ult);
         const sugerida = retiradoDiario ? 'RETIRADO' : decisionSugerida(an, corte, cfg, desertor);
         const guardada = dec.get(idDecision(corte, g.clave, est.nombre));
-        const fila: Fila = { grupo: g, est, an, sugerida, retiradoDiario, desertor, nombreDiario: enDiario, guardada, decision: guardada?.decision ?? sugerida };
+        const fila: Fila = { grupo: g, est, an, sugerida, retiradoDiario, desertor, nombreDiario: enDiario, guardada, decision: guardada ? normalizarDecision(guardada.decision) : sugerida };
         completas.push(fila);
         if (retiradoDiario && !mostrarRetirados) { ocultos++; continue; }
         filas.push(fila);
@@ -416,7 +416,7 @@ export function ConsejoView() {
           <button onClick={() => imprimirRecuperaciones(filasPorGrupo, corte, cfg)}
             className="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-semibold shadow hover:bg-amber-600">🖨 Recuperaciones por área</button>
           <button onClick={() => descargarListaExcel(todasPorGrupo, corte, cfg)}
-            title="Formato institucional (como el de primaria): APROBADO, CURSANDO, REPROBADO, DESERTADO, RETIRADO. Una hoja por grupo."
+            title="Formato institucional (como el de primaria): APROBADO, CURSANDO, REPROBADO, DESERTADO/RETIRADO. Una hoja por grupo."
             className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow hover:bg-emerald-700">⬇ Listado de estados (Excel)</button>
           <button onClick={() => abrirVentana('Listado de estados',
               htmlListas(todasPorGrupo, corte, cfg, g => reportEncabezado(`Listado de estados — ${g.nombre}`, etiquetaCorte(corte), `Reprueba con ${cfg.areasParaReprobar} o más áreas perdidas`, false)),
