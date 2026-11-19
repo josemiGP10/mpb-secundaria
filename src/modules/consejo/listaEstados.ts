@@ -21,25 +21,23 @@ export interface EntradaLista {
   guardada?: DecisionConsejo;
   sugerida?: Decision;          // lo que indicaba la regla
   retiradoDiario?: boolean;
+  retiradoLista?: string | null;  // DESERTADO / RETIRADO según el listado de estados cargado
   motivoDesercion?: string;
 }
 
 interface AreaListada { area: string; nombre: string; nota: number; asigs: { nombre: string; nota: number }[] }
 export interface FilaLista { nombre: string; estado: EstadoInstitucional; areas: AreaListada[]; observacion: string }
 
-/** Observación para el listado: por qué está retirado/desertado, si el
- *  consejo decidió distinto a la regla, y la observación escrita. */
+/** Observación para el listado impreso. SOLO explica retiros/deserciones.
+ *  A propósito NO incluye los ajustes de nota, las decisiones distintas a
+ *  la regla ni las observaciones escritas: lo del preconsejo y las
+ *  comisiones es interno y no debe quedar rastro impreso. */
 function observacion(x: EntradaLista, estado: EstadoInstitucional): string {
-  const partes: string[] = [];
-  if (estado === 'RETIRADO') {
-    if (x.retiradoDiario) partes.push('Retirado en la matrícula');
-    else if (x.motivoDesercion) partes.push(x.motivoDesercion.includes('faltó') ? 'Dejó de asistir (asistencia del diario)' : 'Dejó de asistir (sin notas o 1.0 en el último período)');
-  }
-  if (x.guardada && x.sugerida && estadoInstitucional(x.sugerida) !== estado) {
-    partes.push(`Decisión del consejo (la regla indicaba ${TEXTO_ESTADO[estadoInstitucional(x.sugerida)]})`);
-  }
-  if (x.guardada?.observacion?.trim()) partes.push(x.guardada.observacion.trim());
-  return partes.join('. ');
+  if (estado !== 'RETIRADO') return '';
+  if (x.retiradoDiario) return 'Retirado en la matrícula';
+  if (x.retiradoLista) return x.retiradoLista === 'RETIRADO' ? 'Retirado' : 'Desertado';
+  if (x.motivoDesercion) return 'Dejó de asistir';
+  return '';
 }
 
 export const ESTADOS: EstadoInstitucional[] = ['APROBADO', 'CURSANDO', 'REPROBADO', 'RETIRADO'];
@@ -174,7 +172,11 @@ const COLOR: Record<EstadoInstitucional, string> = {
 };
 const escHtml = (s: string) => s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));
 
-export function htmlListas(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: Corte, cfg: ConfigConsejo, encabezado: (g: GrupoConsejo) => string): string {
+export function htmlListas(
+  porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: Corte, cfg: ConfigConsejo,
+  encabezado: (g: GrupoConsejo) => string,
+  pie?: (g: GrupoConsejo) => string,   // p. ej. firmas de la comisión
+): string {
   return construirListas(porGrupo, corte, cfg).map(({ grupo, filas }, idx) => {
     const cuerpo = filas.map((f, i) => {
       const bloques = f.areas.map(a => Math.max(1, a.asigs.length));
@@ -202,6 +204,7 @@ export function htmlListas(porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: C
       <table><thead><tr><th class="num">#</th><th>Apellidos y nombres</th><th>Estado</th><th>Área</th><th>Nota</th><th>Asignatura</th><th>Nota</th><th>Observación</th></tr></thead>
       <tbody>${cuerpo}</tbody></table>
       <p style="margin-top:6px;font-size:9px;color:#444">${conteo}</p>
+      ${pie ? pie(grupo) : ''}
     </div>`;
   }).join('');
 }

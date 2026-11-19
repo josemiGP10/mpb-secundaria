@@ -57,8 +57,10 @@ function colAIndice(ref: string): number {
   return n - 1;
 }
 
-/** Devuelve la primera hoja del libro como filas de celdas. */
-export async function leerPrimeraHoja(file: File): Promise<Celda[][]> {
+export interface HojaLeida { nombre: string; filas: Celda[][] }
+
+/** Devuelve todas las hojas del libro (en su orden) como filas de celdas. */
+export async function leerHojas(file: File): Promise<HojaLeida[]> {
   const buf = await file.arrayBuffer();
   const zip = leerDirectorioZip(buf);
   const xml = (s: string) => new DOMParser().parseFromString(s, 'application/xml');
@@ -67,18 +69,24 @@ export async function leerPrimeraHoja(file: File): Promise<Celda[][]> {
     return e ? leerArchivoZip(buf, e) : null;
   };
 
-  // Ubicar la primera hoja a través de workbook.xml + sus relaciones
-  let rutaHoja = 'xl/worksheets/sheet1.xml';
+  // Hojas en el orden del libro, ubicadas a través de workbook.xml + relaciones
+  const hojas: { nombre: string; ruta: string }[] = [];
   const wb = await leer('xl/workbook.xml');
   const rels = await leer('xl/_rels/workbook.xml.rels');
   if (wb && rels) {
-    const hoja = xml(wb).getElementsByTagName('sheet')[0];
-    const rid = hoja?.getAttribute('r:id')
-      ?? hoja?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
-    const rel = [...xml(rels).getElementsByTagName('Relationship')].find(r => r.getAttribute('Id') === rid);
-    const target = rel?.getAttribute('Target');
-    if (target) rutaHoja = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
+    const relaciones = [...xml(rels).getElementsByTagName('Relationship')];
+    for (const h of xml(wb).getElementsByTagName('sheet')) {
+      const rid = h.getAttribute('r:id')
+        ?? h.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+      const target = relaciones.find(r => r.getAttribute('Id') === rid)?.getAttribute('Target');
+      if (!target) continue;
+      hojas.push({
+        nombre: h.getAttribute('name') ?? '',
+        ruta: target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`,
+      });
+    }
   }
+  if (hojas.length === 0) hojas.push({ nombre: 'Hoja1', ruta: 'xl/worksheets/sheet1.xml' });
 
   const compartidas: string[] = [];
   const ss = await leer('xl/sharedStrings.xml');
@@ -88,27 +96,37 @@ export async function leerPrimeraHoja(file: File): Promise<Celda[][]> {
     }
   }
 
-  const hojaXml = await leer(rutaHoja);
-  if (!hojaXml) throw new Error('No se encontró la hoja de cálculo dentro del archivo.');
-  const filas: Celda[][] = [];
-  for (const row of xml(hojaXml).getElementsByTagName('row')) {
-    const r = Number(row.getAttribute('r')) - 1;
-    const fila: Celda[] = [];
-    for (const c of row.getElementsByTagName('c')) {
-      const ref = c.getAttribute('r') ?? '';
-      const col = ref ? colAIndice(ref) : fila.length;
-      const t = c.getAttribute('t');
-      const v = c.getElementsByTagName('v')[0]?.textContent ?? null;
-      let valor: Celda = null;
-      if (t === 's' && v !== null) valor = compartidas[Number(v)] ?? '';
-      else if (t === 'inlineStr') valor = [...c.getElementsByTagName('t')].map(x => x.textContent ?? '').join('');
-      else if (t === 'str' || t === 'b' || t === 'e') valor = v;
-      else if (v !== null && v !== '') valor = Number(v);
-      fila[col] = valor;
+  const resultado: HojaLeida[] = [];
+  for (const h of hojas) {
+    const hojaXml = await leer(h.ruta);
+    if (!hojaXml) continue;
+    const filas: Celda[][] = [];
+    for (const row of xml(hojaXml).getElementsByTagName('row')) {
+      const r = Number(row.getAttribute('r')) - 1;
+      const fila: Celda[] = [];
+      for (const c of row.getElementsByTagName('c')) {
+        const ref = c.getAttribute('r') ?? '';
+        const col = ref ? colAIndice(ref) : fila.length;
+        const t = c.getAttribute('t');
+        const v = c.getElementsByTagName('v')[0]?.textContent ?? null;
+        let valor: Celda = null;
+        if (t === 's' && v !== null) valor = compartidas[Number(v)] ?? '';
+        else if (t === 'inlineStr') valor = [...c.getElementsByTagName('t')].map(x => x.textContent ?? '').join('');
+        else if (t === 'str' || t === 'b' || t === 'e') valor = v;
+        else if (v !== null && v !== '') valor = Number(v);
+        fila[col] = valor;
+      }
+      for (let i = 0; i < fila.length; i++) if (fila[i] === undefined) fila[i] = null;
+      filas[r >= 0 ? r : filas.length] = fila;
     }
-    for (let i = 0; i < fila.length; i++) if (fila[i] === undefined) fila[i] = null;
-    filas[r >= 0 ? r : filas.length] = fila;
+    for (let i = 0; i < filas.length; i++) if (!filas[i]) filas[i] = [];
+    resultado.push({ nombre: h.nombre, filas });
   }
-  for (let i = 0; i < filas.length; i++) if (!filas[i]) filas[i] = [];
-  return filas;
+  if (resultado.length === 0) throw new Error('No se encontró ninguna hoja de cálculo dentro del archivo.');
+  return resultado;
+}
+
+/** Devuelve la primera hoja del libro como filas de celdas. */
+export async function leerPrimeraHoja(file: File): Promise<Celda[][]> {
+  return (await leerHojas(file))[0].filas;
 }

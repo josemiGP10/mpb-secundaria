@@ -6,9 +6,18 @@ import {
   CORTES, DECISIONES, periodosDe, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
   decisionSugerida, guardarConfig, periodosIncompletos, areasCalificadasUltimoPeriodo, esPosibleDesertor, normalizarDecision,
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
+  importarListaEstados, normalizarNombre, comisionDe, leerComisiones, guardarComisiones,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
-  type EstudianteConsejo, type GrupoConsejo,
+  type EstudianteConsejo, type GrupoConsejo, type Comision,
 } from './consejoService';
+
+/** Etapas del proceso: preconsejo interno → comisiones → resultados para firma. */
+type Etapa = 'PRECONSEJO' | 'COMISIONES' | 'RESULTADOS';
+const ETAPAS: { id: Etapa; titulo: string; ayuda: string }[] = [
+  { id: 'PRECONSEJO', titulo: '1 · Preconsejo', ayuda: 'Interno. Se puede ayudar a un estudiante subiendo un área a la nota mínima: en pantalla queda marcado, pero en lo impreso no queda rastro. Al final se imprime el listado que va al consejo.' },
+  { id: 'COMISIONES', titulo: '2 · Comisiones', ayuda: 'Cada comisión revisa sus grados. A quien perdió 3 o más áreas se le puede corregir una nota (y pasa a recuperar) o confirmar que pierde el año.' },
+  { id: 'RESULTADOS', titulo: '3 · Resultados', ayuda: 'Listados finales por grado con las firmas de los miembros de cada comisión.' },
+];
 import { descargarListaExcel, htmlListas } from './listaEstados';
 
 const etiquetaCorte = (c: Corte) => (c === 'FINAL' ? 'Nota final del año' : `Período ${c.slice(2)}`);
@@ -21,6 +30,7 @@ interface Fila {
   an: Analisis;
   sugerida: Decision;
   retiradoDiario: boolean;     // figura como retirado en la matrícula del diario
+  retiradoLista: string | null; // DESERTADO/RETIRADO según el listado externo (LISTA 2026)
   nombreDiario: string | null; // con qué nombre se encontró en la matrícula del diario
   desertor: boolean;           // posible desertor (por notas del último período o por asistencia del diario)
   motivoDesercion: string;     // por qué se marcó como posible desertor
@@ -37,70 +47,31 @@ h3 { font-size: 11px; margin: 14px 0 4px; }
 .perd { color: #991b1b; font-weight: bold; }
 .firmas { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 28px 24px; margin-top: 40px; font-size: 9px; color: #444; }
 .firmas div { border-top: 0.5px solid #555; text-align: center; padding-top: 3px; }
+.firmas-tabla { width: 100%; margin-top: 18px; border-collapse: collapse; }
+.firmas-tabla td, .firmas-tabla th { border: 0.5px solid #888; padding: 10px 6px; font-size: 10px; }
+.firmas-tabla th { background: #e0e0e0; font-size: 9px; padding: 4px 6px; }
 `;
 
-function tablaResumen(filasPorGrupo: Map<GrupoConsejo, Fila[]>, cfg: ConfigConsejo): string {
-  let t1 = 0, t2 = 0, t3 = 0, t4 = 0, t5 = 0, tt = 0;
-  const filas = [...filasPorGrupo.entries()].map(([g, fs]) => {
-    const c0 = fs.filter(f => !f.an.sinNingunaNota && f.an.perdidas.length === 0).length;
-    const c1 = fs.filter(f => f.an.perdidas.length === 1).length;
-    const c2 = fs.filter(f => f.an.perdidas.length >= 2 && f.an.perdidas.length < cfg.areasParaReprobar).length;
-    const c3 = fs.filter(f => f.an.perdidas.length >= cfg.areasParaReprobar).length;
-    const sn = fs.filter(f => f.an.sinNingunaNota).length;
-    t1 += c0; t2 += c1; t3 += c2; t4 += c3; t5 += sn; tt += fs.length;
-    return `<tr><td>${esc(g.nombre)}</td><td class="c">${fs.length}</td><td class="c">${c0}</td><td class="c">${c1}</td><td class="c">${c2}</td><td class="c perd">${c3}</td><td class="c">${sn}</td></tr>`;
-  }).join('');
-  const rango2 = cfg.areasParaReprobar > 2 ? `2${cfg.areasParaReprobar > 3 ? `–${cfg.areasParaReprobar - 1}` : ''} áreas` : '—';
-  return `<table><thead><tr><th>Grupo</th><th>Estudiantes</th><th>Sin áreas perdidas</th><th>1 área</th><th>${rango2}</th><th>${cfg.areasParaReprobar}+ áreas</th><th>Sin notas</th></tr></thead>
-    <tbody>${filas}<tr><th style="text-align:left">TOTAL</th><th>${tt}</th><th>${t1}</th><th>${t2}</th><th>${t3}</th><th>${t4}</th><th>${t5}</th></tr></tbody></table>`;
+/** Bloque de firmas de la comisión que corresponde al grado. */
+function bloqueFirmas(com: Comision | undefined): string {
+  if (!com) return '';
+  return `<table class="firmas-tabla">
+    <thead><tr><th colspan="3">Comisión de evaluación y promoción ${esc(com.nombre)}</th></tr>
+    <tr><th style="width:34%">Cargo</th><th style="width:33%">Nombre</th><th>Firma</th></tr></thead>
+    <tbody>${com.miembros.map(m => `<tr><td>${esc(m.rol)}</td><td>${esc(m.nombre)}</td><td></td></tr>`).join('')}</tbody>
+  </table>`;
 }
 
-/** Texto de la decisión para el acta: incluye qué áreas recupera. */
-function textoDecision(f: Fila): string {
-  let html = `<b>${esc(labelDecision(f.decision))}</b>`;
-  if (conRecuperacion(f.decision) && f.an.perdidas.length > 0) {
-    const sel = areasARecuperar(f.an.perdidas, f.guardada);
-    const notas = f.guardada?.notas_recuperacion ?? {};
-    const no = f.an.perdidas.map(p => p.area).filter(a => !sel.includes(a));
-    html += `<br>Recupera: ${sel.length ? sel.map(a => `${esc(a)}${notas[a] != null ? ` → ${fmt(notas[a])}` : ''}`).join(', ') : '—'}`;
-    if (no.length) html += `<br><span style="color:#555">No se le exige: ${no.map(esc).join(', ')}</span>`;
-  }
-  if (f.guardada?.observacion) html += `<br><span style="color:#555">${esc(f.guardada.observacion)}</span>`;
-  return html;
-}
-
-function imprimirActa(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo, retiradosOcultos = 0): void {
-  const detalle = [...filasPorGrupo.entries()].map(([g, fs]) => {
-    const conCaso = fs.filter(f => f.an.perdidas.length > 0 || f.an.sinNingunaNota);
-    const filas = conCaso.length === 0
-      ? `<tr><td colspan="5" class="c">Ningún estudiante con áreas perdidas.</td></tr>`
-      : conCaso.map((f, i) => `
-        <tr><td class="num">${i + 1}</td>
-        <td class="nombre">${esc(f.est.nombre)}</td>
-        <td>${f.an.sinNingunaNota ? '<i>Sin notas registradas</i>' : f.an.perdidas.map(p => `<span class="perd">${esc(p.area)}</span> ${fmt(p.nota)}${p.incompleta ? '*' : ''}`).join(' · ')}</td>
-        <td class="c">${f.an.perdidas.length}</td>
-        <td>${textoDecision(f)}</td></tr>`).join('');
-    return `<h3>${esc(g.nombre)} — ${conCaso.length} de ${fs.length} estudiantes con áreas perdidas</h3>
-      <table><thead><tr><th class="num">#</th><th class="nombre">Estudiante</th><th>Áreas perdidas (nota)</th><th>N°</th><th>Decisión del consejo / observación</th></tr></thead>
-      <tbody>${filas}</tbody></table>`;
-  }).join('');
-
-  abrirVentana(
-    'Acta consejo académico',
-    reportEncabezado(
-      'Consejo Académico — Comisión de Evaluación y Promoción',
-      etiquetaCorte(corte),
-      `Área perdida: nota menor a ${cfg.notaMinima.toFixed(1)}`,
-      false,
-    ) +
-      tablaResumen(filasPorGrupo, cfg) + detalle +
-      (retiradosOcultos > 0 ? `<p style="margin-top:14px;font-size:9px;color:#555">No se incluyen ${retiradosOcultos} estudiantes que figuran como retirados en la matrícula del diario.</p>` : "") +
-      ([...filasPorGrupo.keys()].some(g => g.estudiantes.some(e => e.finalCalculada)) && corte === "FINAL" ? `<p style="margin-top:14px;font-size:9px;color:#555">Nota final provisional (calculada por la app, la plataforma aún no la genera) en: ${[...filasPorGrupo.keys()].filter(g => g.estudiantes.some(e => e.finalCalculada)).map(g => esc(g.nombre)).join(", ")}.</p>` : "") +
-      `<p style="margin-top:6px;font-size:9px;color:#555">* Nota final calculada con algún período sin nota en la plataforma (puede cambiar).</p>` +
-      `<p style="margin-top:4px;font-size:9px;color:#555">Convenciones:${[...new Set([...filasPorGrupo.keys()].flatMap(g => g.areas))].map(a => `${esc(a)} = ${esc(nombreArea(a))}`).join(' · ')}</p>` +
-      `<div class="firmas"><div>Rector(a)</div><div>Coordinador(a)</div><div>Secretario(a) del consejo</div><div>Docente</div><div>Docente</div><div>Docente</div></div>`,
-    PRINT_CSS + CSS_EXTRA,
-  );
+function imprimirListas(
+  titulo: string, porGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo,
+  comisiones: Comision[] | null,   // con comisiones → resultados para firma
+): void {
+  if (porGrupo.size === 0) { alert('No hay grupos con los filtros actuales.'); return; }
+  const html = htmlListas(porGrupo, corte, cfg,
+    g => reportEncabezado(`${titulo} — ${g.nombre}`, etiquetaCorte(corte),
+      comisiones ? `Comisión ${comisiones.find(c => c.id === comisionDe(g))?.nombre ?? ''}` : '', false),
+    comisiones ? g => bloqueFirmas(comisiones.find(c => c.id === comisionDe(g))) : undefined);
+  abrirVentana(titulo, html, PRINT_CSS + CSS_EXTRA);
 }
 
 function imprimirRecuperaciones(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo): void {
@@ -160,6 +131,13 @@ export function ConsejoView() {
   const [error, setError]             = useState<string | null>(null);
   const [reemplazarTodo, setReemplazarTodo] = useState(false);
   const [mostrarRetirados, setMostrarRetirados] = useState(false);
+  const [etapa, setEtapa]             = useState<Etapa>('PRECONSEJO');
+  const [comSel, setComSel]           = useState<string>('TODAS');
+  const [soloPierden, setSoloPierden] = useState(false);
+  const [comisiones, setComisiones]   = useState<Comision[]>(leerComisiones);
+  const [fileLista, setFileLista]     = useState<File | null>(null);
+  const [msgLista, setMsgLista]       = useState<string | null>(null);
+  const cambiarComisiones = (c: Comision[]) => { setComisiones(c); guardarComisiones(c); };
 
   const data = useLiveQuery(() => db.consejo_import.get('actual'), []);
   const decisiones = useLiveQuery(
@@ -189,41 +167,53 @@ export function ConsejoView() {
     let ocultos = 0;
     if (!data) return { filasPorGrupo: mapa, todasPorGrupo: todas, nRetiradosOcultos: 0 };
     const dec = new Map((decisiones ?? []).map(d => [d.id, d]));
+    // Retirados/desertados del listado externo (primaria, Aceleración…)
+    const externos = new Map((data.retiradosExternos ?? []).map(x => [normalizarNombre(x.nombre), x.estado]));
+    const extLista = [...externos.keys()];
     for (const g of data.grupos) {
       if (grupoSel !== 'TODOS' && g.clave !== grupoSel) continue;
+      if (comSel !== 'TODAS' && comisionDe(g) !== comSel) continue;
       const ult = areasCalificadasUltimoPeriodo(g);
       const filas: Fila[] = [], completas: Fila[] = [];
       for (const est of g.estudiantes) {
         const enDiario = indiceDiario ? buscarEnDiario(est.nombre, indiceDiario.conjunto, indiceDiario.lista) : null;
         const retiradoDiario = !!enDiario && indiceDiario!.retirados.has(enDiario);
-        const an = analizar(est, g, corte, cfg);
+        const enLista = extLista.length ? buscarEnDiario(est.nombre, new Set(extLista), extLista) : null;
+        const retiradoLista = enLista ? externos.get(enLista) ?? null : null;
+        const retirado = retiradoDiario || !!retiradoLista;
+        const guardada = dec.get(idDecision(corte, g.clave, est.nombre));
+        const an = analizar(est, g, corte, cfg, guardada?.ajustes);
         const porNotas = esPosibleDesertor(est, ult);
         const asis = enDiario ? indiceDiario?.inasistentes.get(enDiario) : undefined;
-        const desertor = !retiradoDiario && (porNotas || !!asis);
+        const desertor = !retirado && (porNotas || !!asis);
         const motivoDesercion = [
           porNotas ? `en el último período tiene 2.0 o menos (o sin nota) en la mitad o más de las áreas` : '',
           asis ? `en las últimas 4 semanas del diario faltó a ${asis.fallas} de ${asis.total} clases` : '',
         ].filter(Boolean).join('; ');
-        const sugerida = retiradoDiario ? 'RETIRADO' : decisionSugerida(an, corte, cfg, desertor);
-        const guardada = dec.get(idDecision(corte, g.clave, est.nombre));
-        const fila: Fila = { grupo: g, est, an, sugerida, retiradoDiario, desertor, motivoDesercion, nombreDiario: enDiario, guardada, decision: guardada ? normalizarDecision(guardada.decision) : sugerida };
+        const sugerida = retirado ? 'RETIRADO' : decisionSugerida(an, corte, cfg, desertor);
+        const fila: Fila = {
+          grupo: g, est, an, sugerida, retiradoDiario, retiradoLista, desertor, motivoDesercion, nombreDiario: enDiario, guardada,
+          decision: guardada?.decision ? normalizarDecision(guardada.decision) : sugerida,
+        };
         completas.push(fila);
-        if (retiradoDiario && !mostrarRetirados) { ocultos++; continue; }
+        if (retirado && !mostrarRetirados) { ocultos++; continue; }
         filas.push(fila);
       }
       mapa.set(g, filas);
       todas.set(g, completas);
     }
     return { filasPorGrupo: mapa, todasPorGrupo: todas, nRetiradosOcultos: ocultos };
-  }, [data, decisiones, grupoSel, corte, cfg, indiceDiario, mostrarRetirados]);
+  }, [data, decisiones, grupoSel, comSel, corte, cfg, indiceDiario, mostrarRetirados]);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toUpperCase();
     return [...filasPorGrupo.values()].flat()
-      .filter(f => !soloCasos || f.an.perdidas.length > 0 || f.an.sinNingunaNota)
+      // Los que tienen notas ajustadas siguen visibles aunque ya no pierdan áreas
+      .filter(f => !soloCasos || f.an.perdidas.length > 0 || f.an.sinNingunaNota || f.an.ajustadas.length > 0)
+      .filter(f => !(etapa === 'COMISIONES' && soloPierden) || f.an.perdidas.length >= cfg.areasParaReprobar || f.decision === 'NO_PROMOVIDO')
       .filter(f => !q || f.est.nombre.includes(q))
       .sort((a, b) => b.an.perdidas.length - a.an.perdidas.length || a.grupo.grado - b.grupo.grado || a.est.nombre.localeCompare(b.est.nombre, 'es'));
-  }, [filasPorGrupo, soloCasos, busqueda]);
+  }, [filasPorGrupo, soloCasos, busqueda, etapa, soloPierden, cfg]);
 
   const handleImportar = async () => {
     if (!fileAreas || importando) return;
@@ -239,13 +229,34 @@ export function ConsejoView() {
   };
 
   const aplicarSugeridas = async () => {
-    const pendientes = visibles.filter(f => !f.guardada);
+    const pendientes = visibles.filter(f => !f.guardada?.decision);
     if (pendientes.length === 0) return;
     if (!confirm(`Guardar la decisión sugerida para ${pendientes.length} estudiantes que aún no tienen decisión?`)) return;
     await db.consejo_decisiones.bulkPut(pendientes.map(f => ({
+      ...(f.guardada ?? { observacion: '' }),   // conserva ajustes y observaciones
       id: idDecision(corte, f.grupo.clave, f.est.nombre), corte, grupo: f.grupo.clave, nombre: f.est.nombre,
-      decision: f.sugerida, observacion: '', updated_at: new Date().toISOString(),
+      decision: f.sugerida, updated_at: new Date().toISOString(),
     })));
+  };
+
+  const handleCargarLista = async () => {
+    if (!fileLista) return;
+    setMsgLista(null);
+    try {
+      const n = await importarListaEstados(fileLista);
+      setMsgLista(`✓ ${n} estudiantes desertados o retirados leídos de ${fileLista.name}.`);
+      setFileLista(null);
+    } catch (e) {
+      setMsgLista(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  /** Ayudar: sube un área a la nota mínima (o quita el ajuste). */
+  const ajustarArea = (f: Fila, area: string, valor: number | null) => {
+    const ajustes = { ...(f.guardada?.ajustes ?? {}) };
+    if (valor == null) delete ajustes[area]; else ajustes[area] = valor;
+    // Al ajustar, si la decisión era la sugerida, se deja que se recalcule
+    return guardarDecision(corte, f.grupo.clave, f.est.nombre, { ajustes, ...(f.guardada?.decision === f.sugerida ? { quitarDecision: true } : {}) });
   };
 
   const toggle = (id: string) => setAbiertos(s => {
@@ -297,6 +308,24 @@ export function ConsejoView() {
           </label>
         </div>
       )}
+      <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-2">
+        <span className="text-xs text-slate-600">
+          <b>3. Listado de estados con retirados</b> (opcional) — p. ej. <i>LISTA 2026.xlsx</i> de primaria. Se toman los
+          marcados <b>DESERTADO</b> o <b>RETIRADO</b>, para los grupos que no están en el diario (primaria, Aceleración).
+        </span>
+        <div className="flex gap-2 items-center flex-wrap">
+          <input type="file" accept=".xlsx" style={{ color: "#334155" }} onChange={e => setFileLista(e.target.files?.[0] ?? null)}
+            className="text-xs flex-1 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700" />
+          <button onClick={handleCargarLista} disabled={!fileLista}
+            className="px-3 py-1.5 rounded-lg bg-slate-700 text-white text-xs font-semibold disabled:opacity-40">Cargar listado</button>
+        </div>
+        {msgLista && <p className="text-[11px] text-slate-600">{msgLista}</p>}
+        {data?.retiradosExternos && (
+          <p className="text-[10px] text-slate-400">
+            Cargado: {data.retiradosExternos.length} retirados/desertados de {data.archivo_lista}. Cargar otro listado lo reemplaza.
+          </p>
+        )}
+      </div>
     </div>
   );
 
@@ -311,7 +340,7 @@ export function ConsejoView() {
           <div className="text-5xl mb-2">⚖</div>
           <h2 className="text-base font-semibold text-slate-800">Consejo Académico</h2>
           <p className="text-sm text-slate-500 max-w-sm">
-            Estudiantes con áreas perdidas, decisión del consejo (recupera, promovido, no promovido) y acta para imprimir.
+            Preconsejo, comisiones de evaluación y listados finales por grado para firma.
           </p>
         </div>
         {panelImport}
@@ -325,11 +354,27 @@ export function ConsejoView() {
     <div className="flex flex-col h-full">
       {/* Barra de filtros */}
       <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-surface-muted bg-surface-card flex-shrink-0">
+        {/* Etapas del proceso */}
+        <div className="flex rounded-lg border border-slate-200 overflow-hidden self-start">
+          {ETAPAS.map(x => (
+            <button key={x.id} onClick={() => setEtapa(x.id)} title={x.ayuda}
+              className={`px-3 py-1.5 text-xs font-semibold ${etapa === x.id ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+              {x.titulo}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-500 -mt-0.5">{ETAPAS.find(x => x.id === etapa)!.ayuda}</p>
         <div className="flex gap-1.5 flex-wrap items-center">
+          <select value={comSel} onChange={e => { setComSel(e.target.value); setGrupoSel('TODOS'); }}
+            className="bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5">
+            <option value="TODAS">Todas las comisiones</option>
+            {comisiones.map(c => <option key={c.id} value={c.id}>Comisión {c.nombre}</option>)}
+          </select>
           <select value={grupoSel} onChange={e => setGrupoSel(e.target.value)}
             className="bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5">
             <option value="TODOS">Todos los grupos</option>
-            {data.grupos.map(g => <option key={g.clave} value={g.clave}>{g.nombre}</option>)}
+            {data.grupos.filter(g => comSel === 'TODAS' || comisionDe(g) === comSel)
+              .map(g => <option key={g.clave} value={g.clave}>{g.nombre}</option>)}
           </select>
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">
             {CORTES.map(c => (
@@ -347,7 +392,13 @@ export function ConsejoView() {
             <input type="checkbox" checked={soloCasos} onChange={e => setSoloCasos(e.target.checked)} />
             Solo con áreas perdidas
           </label>
-          <label className="flex items-center gap-1" title="Retirados según la matrícula del diario (la misma de la lista de asistencia)">
+          {etapa === 'COMISIONES' && (
+            <label className="flex items-center gap-1 font-semibold text-red-700">
+              <input type="checkbox" checked={soloPierden} onChange={e => setSoloPierden(e.target.checked)} />
+              Solo los que pierden el año ({cfg.areasParaReprobar}+ áreas)
+            </label>
+          )}
+          <label className="flex items-center gap-1" title="Retirados según la matrícula del diario y el listado de estados cargado">
             <input type="checkbox" checked={mostrarRetirados} onChange={e => setMostrarRetirados(e.target.checked)} />
             Mostrar retirados{!mostrarRetirados && nRetiradosOcultos > 0 ? ` (${nRetiradosOcultos} ocultos)` : ''}
           </label>
@@ -372,6 +423,26 @@ export function ConsejoView() {
                 className="w-14 bg-white text-slate-900 border border-slate-300 rounded px-1.5 py-0.5" />
               o más áreas perdidas (nota final)
             </label>
+            <details className="w-full">
+              <summary className="cursor-pointer text-blue-700">👥 Miembros de las comisiones (salen en los resultados para firma)</summary>
+              <div className="grid sm:grid-cols-2 gap-3 mt-2">
+                {comisiones.map((c, ci) => (
+                  <div key={c.id} className="bg-white rounded-lg border border-slate-200 p-2">
+                    <p className="font-semibold text-slate-800 mb-1">Comisión {c.nombre}</p>
+                    {c.miembros.map((m, mi) => (
+                      <label key={mi} className="flex items-center gap-1.5 mb-1">
+                        <span className="w-44 text-[11px] text-slate-500">{m.rol}</span>
+                        <input value={m.nombre}
+                          onChange={e => cambiarComisiones(comisiones.map((cc, i) => i !== ci ? cc : {
+                            ...cc, miembros: cc.miembros.map((mm, j) => j !== mi ? mm : { ...mm, nombre: e.target.value.toUpperCase() }),
+                          }))}
+                          className="flex-1 bg-white text-slate-900 border border-slate-300 rounded px-1.5 py-0.5 text-[11px]" />
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </details>
           </div>
         )}
       </div>
@@ -434,24 +505,33 @@ export function ConsejoView() {
           </table>
         </div>
 
-        {/* Acciones */}
+        {/* Acciones según la etapa. Nada impreso muestra los ajustes de nota
+            ni las observaciones internas: solo el resultado. */}
         <div className="flex gap-2 flex-wrap">
-          <button onClick={() => imprimirActa(filasPorGrupo, corte, cfg, nRetiradosOcultos)}
-            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Acta del consejo</button>
-          <button onClick={() => imprimirRecuperaciones(filasPorGrupo, corte, cfg)}
-            className="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-semibold shadow hover:bg-amber-600">🖨 Recuperaciones por área</button>
+          {etapa !== 'RESULTADOS' && (
+            <button onClick={() => imprimirListas('Listado para el Consejo Académico', todasPorGrupo, corte, cfg, null)}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Listado para el consejo</button>
+          )}
+          {etapa === 'RESULTADOS' && (
+            <button onClick={() => imprimirListas('Resultados de evaluación y promoción', todasPorGrupo, corte, cfg, comisiones)}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Resultados para firma (por grado)</button>
+          )}
           <button onClick={() => descargarListaExcel(todasPorGrupo, corte, cfg)}
             title="Formato institucional (como el de primaria): APROBADO, CURSANDO, REPROBADO, DESERTADO/RETIRADO. Una hoja por grupo."
-            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow hover:bg-emerald-700">⬇ Listado de estados (Excel)</button>
-          <button onClick={() => abrirVentana('Listado de estados',
-              htmlListas(todasPorGrupo, corte, cfg, g => reportEncabezado(`Listado de estados — ${g.nombre}`, etiquetaCorte(corte), `Reprueba con ${cfg.areasParaReprobar} o más áreas perdidas`, false)),
-              PRINT_CSS + CSS_EXTRA)}
-            className="px-4 py-2 rounded-xl bg-white border border-emerald-600 text-emerald-700 text-xs font-semibold hover:bg-emerald-50">🖨 Listado de estados</button>
-          <button onClick={aplicarSugeridas}
-            className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50">
-            ✓ Aplicar sugeridas a los pendientes
-          </button>
-          <span className="text-xs text-slate-500 self-center">{nCasos} estudiantes con áreas perdidas · {etiquetaCorte(corte)}</span>
+            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow hover:bg-emerald-700">⬇ Listado (Excel)</button>
+          {etapa === 'RESULTADOS' && (
+            <button onClick={() => imprimirRecuperaciones(filasPorGrupo, corte, cfg)}
+              className="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-semibold shadow hover:bg-amber-600">🖨 Recuperaciones por área</button>
+          )}
+          {etapa !== 'RESULTADOS' && (
+            <button onClick={aplicarSugeridas}
+              className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50">
+              ✓ Aplicar sugeridas a los pendientes
+            </button>
+          )}
+          <span className="text-xs text-slate-500 self-center">
+            {nCasos} con áreas perdidas · {[...filasPorGrupo.values()].flat().filter(f => f.an.ajustadas.length > 0).length} con notas ajustadas · {etiquetaCorte(corte)}
+          </span>
         </div>
 
         {/* Lista de estudiantes */}
@@ -470,6 +550,12 @@ export function ConsejoView() {
                   <span className="text-[10px] font-bold text-slate-700 bg-slate-200 rounded px-1.5 py-0.5"
                     title={`Retirado en la matrícula del Diario Pedagógico como: ${f.nombreDiario ?? ""}`}>Retirado en el diario{f.nombreDiario && f.nombreDiario !== f.est.nombre ? ` (${f.nombreDiario})` : ""}</span>
                 )}
+                {f.retiradoLista && !f.retiradoDiario && (
+                  <span className="text-[10px] font-bold text-slate-700 bg-slate-200 rounded px-1.5 py-0.5"
+                    title={`Marcado ${f.retiradoLista} en ${data.archivo_lista ?? 'el listado de estados'}`}>
+                    {f.retiradoLista === 'RETIRADO' ? 'Retirado' : 'Desertado'} (listado)
+                  </span>
+                )}
                 {f.desertor && (
                   <span className="text-[10px] font-bold text-yellow-900 bg-yellow-200 rounded px-1.5 py-0.5"
                     title={`Posible desertor: ${f.motivoDesercion}`}>
@@ -484,13 +570,31 @@ export function ConsejoView() {
                 </span>
               </div>
 
-              {f.an.perdidas.length > 0 && (
-                <div className="flex gap-1 flex-wrap">
+              {(f.an.perdidas.length > 0 || f.an.ajustadas.length > 0) && (
+                <div className="flex gap-1 flex-wrap items-center">
                   {f.an.perdidas.map(p => (
                     <span key={p.area}
                       title={`${nombreArea(p.area)}${p.incompleta ? ' — falta la nota de algún período; la final puede cambiar' : ''}`}
-                      className={`text-xs rounded-md border px-2 py-0.5 ${p.incompleta ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                      className={`text-xs rounded-md border pl-2 pr-1 py-0.5 flex items-center gap-1 ${p.incompleta ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
                       {nombreArea(p.area)} <b>{fmt(p.nota)}</b>{p.incompleta && ' *'}
+                      {etapa !== 'RESULTADOS' && corte === 'FINAL' && (
+                        <button onClick={() => ajustarArea(f, p.area, cfg.notaMinima)}
+                          title={`Ayudar: subir ${nombreArea(p.area)} a ${cfg.notaMinima.toFixed(1)}. En pantalla queda marcado; en lo impreso sale como nota normal.`}
+                          className="ml-0.5 rounded bg-white/80 border border-current px-1 text-[10px] font-bold hover:bg-violet-100 hover:text-violet-800">
+                          ↑{cfg.notaMinima.toFixed(1)}
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                  {f.an.ajustadas.map(a => (
+                    <span key={a.area}
+                      title="Nota ajustada en preconsejo/comisión. Solo se ve aquí: en los listados impresos sale como la nota del área."
+                      className="text-xs rounded-md border border-violet-300 bg-violet-50 text-violet-800 pl-2 pr-1 py-0.5 flex items-center gap-1">
+                      ✎ {nombreArea(a.area)} {fmt(a.original)} → <b>{fmt(a.nota)}</b>
+                      {etapa !== 'RESULTADOS' && (
+                        <button onClick={() => ajustarArea(f, a.area, null)} title="Quitar el ajuste"
+                          className="ml-0.5 rounded px-1 text-[10px] font-bold hover:bg-violet-200">✕</button>
+                      )}
                     </span>
                   ))}
                   {f.an.sinNota.length > 0 && !f.an.sinNingunaNota && (
@@ -505,18 +609,18 @@ export function ConsejoView() {
                   className={`text-xs rounded-lg px-2 py-1.5 border border-slate-300 font-semibold ${color}`}>
                   {DECISIONES.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
                 </select>
-                {!f.guardada && <span className="text-[10px] text-slate-400">sugerida — aún sin confirmar</span>}
-                {f.guardada && f.decision !== f.sugerida && (
+                {!f.guardada?.decision && <span className="text-[10px] text-slate-400">sugerida — aún sin confirmar</span>}
+                {f.guardada?.decision && f.decision !== f.sugerida && (
                   <span className="text-[10px] text-violet-800 bg-violet-100 rounded px-1.5 py-0.5 flex items-center gap-1.5">
                     Decisión del consejo · la regla indicaba: <b>{labelDecision(f.sugerida)}</b>
                     <button
-                      onClick={() => guardarDecision(corte, f.grupo.clave, f.est.nombre, { decision: f.sugerida })}
+                      onClick={() => guardarDecision(corte, f.grupo.clave, f.est.nombre, { quitarDecision: true })}
                       className="underline text-violet-700 hover:text-violet-900">Volver a la sugerida</button>
                   </span>
                 )}
                 <ObservacionInput
                   valor={f.guardada?.observacion ?? ''}
-                  onGuardar={v => guardarDecision(corte, f.grupo.clave, f.est.nombre, { observacion: v, decision: f.decision })} />
+                  onGuardar={v => guardarDecision(corte, f.grupo.clave, f.est.nombre, { observacion: v })} />
               </div>
 
               {conRecuperacion(f.decision) && f.an.perdidas.length > 0 && (

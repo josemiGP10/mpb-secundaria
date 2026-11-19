@@ -7,7 +7,7 @@
 // ============================================================
 
 import { db } from '@/db/database';
-import { leerPrimeraHoja, type Celda } from './xlsxLite';
+import { leerHojas, leerPrimeraHoja, type Celda } from './xlsxLite';
 
 export const CORTES = ['FINAL', 'P.1', 'P.2', 'P.3', 'P.4'] as const;
 export type Corte = typeof CORTES[number];
@@ -43,6 +43,10 @@ export interface ImportConsejo {
   archivo_areas: string;
   archivo_asignaturas: string | null;
   grupos: GrupoConsejo[];
+  /** Retirados/desertados tomados de un listado externo (p. ej. LISTA 2026
+   *  de primaria), para estudiantes que no están en el diario. */
+  retiradosExternos?: { nombre: string; estado: string; hoja: string }[];
+  archivo_lista?: string;
 }
 
 // 'DESERTADO' existió como decisión aparte; ahora desertado y retirado son
@@ -82,8 +86,13 @@ export interface DecisionConsejo {
   corte: Corte;
   grupo: string;
   nombre: string;
-  decision: Decision;
+  /** Decisión confirmada. Si no hay, rige la sugerida por la regla. */
+  decision?: Decision;
   observacion: string;
+  /** Preconsejo/comisión: nota de área ajustada (p. ej. se sube a 6.5 para
+   *  ayudar al estudiante). Se usa en todos los cálculos y listados como si
+   *  fuera la nota; solo se ve como ajuste en pantalla. */
+  ajustes?: Record<string, number>;
   /** Áreas que el consejo decidió que va a recuperar. Si no existe, se
    *  asumen todas las áreas perdidas. */
   areas_recuperar?: string[];
@@ -137,7 +146,7 @@ export const NOMBRE_ASIGNATURA: Record<string, string> = {
   GEOM: 'Geometría', EST: 'Estadística',
   E2: 'Eje Deporte y Recreación', ECIYT: 'Eje Ciencia y Tecnología', ECLUB: 'Eje Club de Lectura',
   EJARY: 'Eje Arte y Cultura', EJTUR: 'Eje Turismo', Ej: 'Eje Movilizador',
-  AFROC: 'Afrocolombianidad', ERyP: 'Ética y Religión', Raice: 'Raíces',
+  AFROC: 'Afrocolombianidad', ERyP: 'Ética y Religión', Raice: 'Raíces', RSoci: 'Raíces Socioafectivas',
   SOC: 'Ciencias Sociales', CCIU: 'Competencias Ciudadanas', GEOG: 'Geografía', HIST: 'Historia',
   CYECO: 'Ciencias Económicas y Políticas', FIL: 'Filosofía', PPP: 'Proyecto Pedagógico Productivo',
 };
@@ -161,6 +170,8 @@ const AREA_DE_ASIGNATURA: Record<string, string[]> = {
   SOC: ['SOC'], CCIU: ['SOC'], GEOG: ['SOC'], HIST: ['SOC'], CYECO: ['SOC'], FIL: ['SOC'],
   // MEF y Aceleración
   PPP: ['SOC'], QUYBI: ['CNAT'], Raice: ['RU'],
+  // Primaria
+  RSoci: ['RU'],
 };
 
 export function asignaturasDeArea(grupo: GrupoConsejo, area: string): string[] {
@@ -176,6 +187,7 @@ export function asignaturasDeArea(grupo: GrupoConsejo, area: string): string[] {
 const GRADOS: [RegExp, number][] = [
   [/^und[eé]cimo/i, 11], [/^d[eé]cimo/i, 10], [/^noveno/i, 9],
   [/^octavo/i, 8], [/^s[eé]ptimo/i, 7], [/^sexto/i, 6],
+  [/^quinto/i, 5], [/^cuarto/i, 4], [/^tercero/i, 3], [/^segundo/i, 2], [/^primero/i, 1],
 ];
 
 function nombreGrupo(raw: string): { nombre: string; grado: number } {
@@ -185,7 +197,7 @@ function nombreGrupo(raw: string): { nombre: string; grado: number } {
     const nums = limpio.match(/\d+/g) ?? [];
     return { nombre: `MEF ${nums.join('-')}`, grado: 20 + Number(nums[0] ?? 0) };
   }
-  if (/^aceleraci/i.test(limpio)) return { nombre: 'Aceleración', grado: 5 };
+  if (/^aceleraci/i.test(limpio)) return { nombre: 'Aceleración', grado: 5.5 };
   for (const [re, g] of GRADOS) {
     if (re.test(limpio)) {
       const letra = limpio.split(' ')[1] ?? '';
@@ -442,9 +454,48 @@ export async function importarConsolidados(
     archivo_areas: fileAreas.name,
     archivo_asignaturas: fileAsig?.name ?? null,
     grupos: todos,
+    // El listado externo de retirados se conserva al recargar notas
+    ...(previo?.retiradosExternos ? { retiradosExternos: previo.retiradosExternos, archivo_lista: previo.archivo_lista } : {}),
   };
   await db.consejo_import.put(data);
   return data;
+}
+
+/** Lee un listado de estados como el "LISTA 2026" de primaria (una hoja por
+ *  grado, con columnas APELLIDOS Y NOMBRES y ESTADO) y guarda los
+ *  estudiantes marcados DESERTADO o RETIRADO. Sirve para los grupos que no
+ *  están en el diario (primaria, preescolar, Aceleración). */
+export async function importarListaEstados(file: File): Promise<number> {
+  const hojas = await leerHojas(file);
+  const encontrados: { nombre: string; estado: string; hoja: string }[] = [];
+  const texto = (x: Celda) => (typeof x === 'string' ? x.trim() : '');
+  for (const h of hojas) {
+    h.filas.forEach((fila, i) => {
+      fila.forEach((celda, j) => {
+        if (texto(celda).toUpperCase() !== 'ESTADO') return;
+        // Columna del nombre: la de "APELLIDOS Y NOMBRES" más cercana a la izquierda
+        let jn = -1;
+        for (let k = j - 1; k >= 0; k--) if (/APELLIDOS/i.test(texto(fila[k]))) { jn = k; break; }
+        if (jn < 0) return;
+        for (const r of h.filas.slice(i + 1)) {
+          if (/APELLIDOS/i.test(texto(r[jn] ?? null))) break;     // empieza otro bloque
+          const nombre = texto(r[jn] ?? null);
+          const estado = texto(r[j] ?? null).toUpperCase();
+          if (nombre && (estado === 'DESERTADO' || estado === 'RETIRADO')) {
+            encontrados.push({ nombre: nombre.replace(/\s+/g, ' ').toUpperCase(), estado, hoja: h.nombre });
+          }
+        }
+      });
+    });
+  }
+  const unicos = [...new Map(encontrados.map(x => [x.nombre, x])).values()];
+  const previo = await db.consejo_import.get('actual');
+  await db.consejo_import.put({
+    ...(previo ?? { id: 'actual', importado_at: new Date().toISOString(), archivo_areas: '', archivo_asignaturas: null, grupos: [] }),
+    retiradosExternos: unicos,
+    archivo_lista: file.name,
+  });
+  return unicos.length;
 }
 
 // ── Análisis por estudiante ─────────────────────────────────
@@ -452,18 +503,26 @@ export async function importarConsolidados(
 export interface Analisis {
   /** incompleta: la nota final del área se calculó con algún período sin nota. */
   perdidas: { area: string; nota: number; incompleta: boolean }[];
+  /** Áreas cuya nota se ajustó en preconsejo/comisión (original → ajustada). */
+  ajustadas: { area: string; original: number | null; nota: number }[];
   sinNota: string[];
   sinNingunaNota: boolean;
   promedio: number | null;
 }
 
-export function analizar(e: EstudianteConsejo, grupo: GrupoConsejo, corte: Corte, cfg: ConfigConsejo): Analisis {
+export function analizar(
+  e: EstudianteConsejo, grupo: GrupoConsejo, corte: Corte, cfg: ConfigConsejo,
+  ajustes?: Record<string, number>,
+): Analisis {
   const notas = e.areas[corte] ?? {};
   const perdidas: Analisis['perdidas'] = [];
+  const ajustadas: Analisis['ajustadas'] = [];
   const sinNota: string[] = [];
   const vals: number[] = [];
   for (const a of grupo.areas) {
-    const v = notas[a];
+    const ajuste = corte === 'FINAL' ? ajustes?.[a] : undefined;
+    if (ajuste != null) ajustadas.push({ area: a, original: notas[a] ?? null, nota: ajuste });
+    const v = ajuste ?? notas[a];
     if (v == null) { sinNota.push(a); continue; }
     vals.push(v);
     const incompleta = corte === 'FINAL' && periodosDe(grupo).some(p => e.areas[p]?.[a] == null);
@@ -471,6 +530,7 @@ export function analizar(e: EstudianteConsejo, grupo: GrupoConsejo, corte: Corte
   }
   return {
     perdidas: perdidas.sort((x, y) => x.nota - y.nota),
+    ajustadas,
     sinNota,
     sinNingunaNota: vals.length === 0,
     promedio: vals.length ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10 : null,
@@ -528,18 +588,88 @@ export const idDecision = (corte: Corte, grupo: string, nombre: string) => `${co
 
 export async function guardarDecision(
   corte: Corte, grupo: string, nombre: string,
-  cambios: Partial<Pick<DecisionConsejo, 'decision' | 'observacion' | 'areas_recuperar' | 'notas_recuperacion'>>,
+  cambios: Partial<Pick<DecisionConsejo, 'decision' | 'observacion' | 'areas_recuperar' | 'notas_recuperacion' | 'ajustes'>>
+    & { quitarDecision?: boolean },
 ): Promise<void> {
   const id = idDecision(corte, grupo, nombre);
   const prev = await db.consejo_decisiones.get(id);
   await db.consejo_decisiones.put({
     id, corte, grupo, nombre,
-    decision: cambios.decision ?? prev?.decision ?? 'PENDIENTE',
+    // Sin decisión explícita se conserva la anterior (o ninguna: rige la sugerida)
+    decision: cambios.quitarDecision ? undefined : (cambios.decision ?? prev?.decision),
     observacion: cambios.observacion ?? prev?.observacion ?? '',
     areas_recuperar: cambios.areas_recuperar ?? prev?.areas_recuperar,
     notas_recuperacion: cambios.notas_recuperacion ?? prev?.notas_recuperacion,
+    ajustes: cambios.ajustes ?? prev?.ajustes,
     updated_at: new Date().toISOString(),
   });
+}
+
+// ── Comisiones de evaluación y promoción ────────────────────
+
+export interface MiembroComision { rol: string; nombre: string }
+export interface Comision { id: string; nombre: string; miembros: MiembroComision[] }
+
+/** Comisiones 2026 (según el cuadro de comisiones del colegio). Los nombres
+ *  se pueden cambiar en la app; esto es el valor inicial. */
+export const COMISIONES_DEFAULT: Comision[] = [
+  { id: 'C1', nombre: 'E.I. - 1° - 2°', miembros: [
+    { rol: 'Docente consejo académico', nombre: 'LIDA GOMEZ' },
+    { rol: 'Docente representante rector', nombre: 'IDASLINA CHOLES' },
+    { rol: 'Padre educación inicial', nombre: 'BLADIMIRO REDONDO' },
+    { rol: 'Padre grado 1°', nombre: 'YANICA REDONDO' },
+    { rol: 'Padre grado 2°', nombre: 'YERLIS ESCORCIA' },
+  ] },
+  { id: 'C2', nombre: '3° - 4° - 5° - Aceleración', miembros: [
+    { rol: 'Docente consejo académico', nombre: 'GLENIS VELASQUEZ' },
+    { rol: 'Docente representante rector', nombre: 'IDALENIS CARDOZO' },
+    { rol: 'Padre grado 3°', nombre: 'SICELYS PEÑARANDA' },
+    { rol: 'Padre grado 4°', nombre: 'DANIELA REDONDO' },
+    { rol: 'Padre grado 5°', nombre: 'MILENA JARABA' },
+    { rol: 'Padre grado Aceleración', nombre: 'MILLER MINDIOLA' },
+  ] },
+  { id: 'C3', nombre: '6° - 7° - MEF 6°/7°', miembros: [
+    { rol: 'Docente consejo académico', nombre: 'MARITZA PEROZO' },
+    { rol: 'Docente representante rector', nombre: 'DAMILSE PIMIENTA' },
+    { rol: 'Padre grado 6°', nombre: 'CARLOS JOSE QUINTERO' },
+    { rol: 'Padre grado 7°', nombre: 'YOSELIN GUALE' },
+    { rol: 'Padre grado MEF 6°/7°', nombre: 'EMILSE BERRIOS' },
+  ] },
+  { id: 'C4', nombre: '8° - 9° - MEF 8°/9°', miembros: [
+    { rol: 'Docente consejo académico', nombre: 'PEDRO ENCINA' },
+    { rol: 'Docente representante rector', nombre: 'LUIS MONTAÑEZ' },
+    { rol: 'Padre grado 8°', nombre: 'YAMELIS VARELAS' },
+    { rol: 'Padre grado 9°', nombre: 'LICERIS REDONDO' },
+    { rol: 'Padre grado MEF 8°/9°', nombre: 'EDITH VILLADIEGO' },
+  ] },
+  { id: 'C5', nombre: '10° - 11° - MEF 10°/11°', miembros: [
+    { rol: 'Docente consejo académico', nombre: 'JOSE GONZALEZ' },
+    { rol: 'Docente representante rector', nombre: 'LUIS ESPAÑOL' },
+    { rol: 'Padre grado 10°', nombre: 'MARCELYS OÑATE' },
+    { rol: 'Padre grado 11°', nombre: 'DOLKIS MORA' },
+    { rol: 'Padre grado MEF 10°/11°', nombre: 'SOREYIS BERRIO' },
+  ] },
+];
+
+/** A qué comisión pertenece un grupo (por grado; MEF = 20 + primer grado). */
+export function comisionDe(grupo: GrupoConsejo): string {
+  const g = grupo.grado;
+  if (g <= 2) return 'C1';
+  if (g <= 5.5) return 'C2';            // 3°, 4°, 5° y Aceleración (5.5)
+  if (g <= 7 || g === 26) return 'C3';  // 6°, 7°, MEF 6-7
+  if (g <= 9 || g === 28) return 'C4';  // 8°, 9°, MEF 8-9
+  return 'C5';                           // 10°, 11°, MEF 10-11
+}
+
+const COM_KEY = 'mpb_sec_consejo_comisiones';
+export function leerComisiones(): Comision[] {
+  try {
+    const raw = localStorage.getItem(COM_KEY);
+    return raw ? JSON.parse(raw) as Comision[] : COMISIONES_DEFAULT;
+  } catch { return COMISIONES_DEFAULT; }
+}
+export function guardarComisiones(c: Comision[]): void {
+  try { localStorage.setItem(COM_KEY, JSON.stringify(c)); } catch { /* sin almacenamiento: se usa en memoria */ }
 }
 
 // ── Configuración (preferencia de este equipo) ──────────────
