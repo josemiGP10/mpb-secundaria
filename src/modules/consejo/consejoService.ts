@@ -354,13 +354,18 @@ interface GrupoLeido {
   clave: string;
   cols: string[];
   idx: { j: number; c: string }[];   // columna del Excel → código de área/asignatura
-  est: Map<string, Partial<Record<Corte, Notas>>>;
+  est: Map<string, NotasLeidas>;
 }
+
+/** Notas leídas de un estudiante. "ACUM" es el acumulado que la plataforma
+ *  exporta (en MEF) mientras no genera la FINAL: el promedio de los
+ *  períodos contando como 0 el que falta, igual que hará la FINAL. */
+type NotasLeidas = Partial<Record<Corte | 'ACUM', Notas>>;
 
 function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
   const grupos: GrupoLeido[] = [];
   let g: GrupoLeido | null = null;
-  let actual: Partial<Record<Corte, Notas>> | null = null;
+  let actual: NotasLeidas | null = null;
   for (let i = 0; i < filas.length; i++) {
     const r = filas[i];
     if (r[0] === 'Grupo') {
@@ -373,11 +378,11 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
       continue;
     }
     if (!g) continue;
-    const corte = typeof r[5] === 'string' ? r[5].trim() : '';
-    if (!(CORTES as readonly string[]).includes(corte)) continue;
-    // Cada estudiante empieza en la fila que trae su nombre. Normalmente es
-    // la fila FINAL, pero cuando la plataforma aún no genera la nota final
-    // (período abierto) el nombre viene en la fila P.1 y no hay fila FINAL.
+    const corte = typeof r[5] === 'string' ? r[5].trim().toUpperCase() : '';
+    if (!(CORTES as readonly string[]).includes(corte) && corte !== 'ACUM') continue;
+    // Cada estudiante empieza en la fila que trae su nombre. Según el estado
+    // de la plataforma, esa primera fila es FINAL, ACUM (acumulado, en MEF
+    // con período abierto) o P.1 (cuando no hay ni FINAL ni ACUM).
     const nombre = normNombre(r[0]);
     if (nombre) {
       // Las filas "1. superior", "2. alto"... al final de cada grupo son
@@ -385,13 +390,13 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
       if (/^\d+\./.test(nombre)) { actual = null; continue; }
       actual = {};
       g.est.set(nombre, actual);
-    } else if (corte === 'FINAL') {
-      actual = null;
+    } else if (corte === 'FINAL' && !actual) {
+      continue;
     }
     if (!actual) continue;
     const notas: Notas = {};
     for (const { j, c } of g.idx) notas[c] = aNota(r[j] ?? null);
-    actual[corte as Corte] = notas;
+    actual[corte as Corte | 'ACUM'] = notas;
   }
   return grupos;
 }
@@ -433,12 +438,19 @@ export async function importarConsolidados(
       clave: ga.clave, nombre, grado, numPeriodos: numPeriodos || 4,
       areas: ga.cols,
       asignaturas: gs?.cols ?? [],
-      estudiantes: [...ga.est.entries()].map(([n, notas]) => {
-        const asig = gs?.est.get(n);
-        const sinFinal = !notas.FINAL;
-        if (sinFinal) notas.FINAL = calcularFinal(notas, ga.cols, pers);
-        if (asig && !asig.FINAL) asig.FINAL = calcularFinal(asig, gs!.cols, pers);
-        return { nombre: n, areas: notas, asignaturas: asig, ...(sinFinal ? { finalCalculada: true } : {}) };
+      estudiantes: [...ga.est.entries()].map(([n, leidas]) => {
+        // Nota final: la FINAL de la plataforma; si no viene, su ACUM (el
+        // acumulado oficial); y si tampoco, la calcula la app (provisional).
+        const completar = (x: NotasLeidas, cols: string[]): { notas: Partial<Record<Corte, Notas>>; calculada: boolean } => {
+          const { ACUM: acum, ...notas } = x;
+          if (notas.FINAL) return { notas, calculada: false };
+          if (acum) return { notas: { ...notas, FINAL: acum }, calculada: false };
+          return { notas: { ...notas, FINAL: calcularFinal(notas, cols, pers) }, calculada: true };
+        };
+        const areasN = completar(leidas, ga.cols);
+        const asigL = gs?.est.get(n);
+        const asigN = asigL ? completar(asigL, gs!.cols).notas : undefined;
+        return { nombre: n, areas: areasN.notas, asignaturas: asigN, ...(areasN.calculada ? { finalCalculada: true } : {}) };
       }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     };
   });
