@@ -177,7 +177,12 @@ export interface OpcionesImpresion {
   estados?: EstadoInstitucional[];
   /** Texto a mostrar por estado (p. ej. CURSANDO → NIVELAR en el acta). */
   textos?: Partial<Record<EstadoInstitucional, string>>;
+  /** Marca cada hoja como BORRADOR (documento de trabajo de la comisión). */
+  borrador?: boolean;
 }
+
+const SELLO_BORRADOR = `<div style="border:2px dashed #b45309;color:#b45309;font-weight:bold;text-align:center;padding:4px;margin-bottom:6px;font-size:11px">
+  BORRADOR — SUJETO A CAMBIOS DE LA COMISIÓN · NO ES EL ACTA FINAL</div>`;
 
 export function htmlListas(
   porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: Corte, cfg: ConfigConsejo,
@@ -213,6 +218,7 @@ export function htmlListas(
     }).join('');
     const conteo = incluidos.map(e => `${texto(e)}: ${filas.filter(f => f.estado === e).length}`).join(' · ');
     return `<div class="${idx > 0 ? 'pg' : ''}">
+      ${opciones.borrador ? SELLO_BORRADOR : ''}
       ${encabezado(grupo)}
       <table><thead><tr><th class="num">#</th><th>Apellidos y nombres</th><th>Estado</th><th>Área</th><th>Nota</th><th>Asignatura</th><th>Nota</th><th>Observación</th></tr></thead>
       <tbody>${cuerpo}</tbody></table>

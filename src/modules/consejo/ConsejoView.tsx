@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
 import { PRINT_CSS, abrirVentana, reportEncabezado } from '../reportes/ReportesView';
 import {
-  CORTES, DECISIONES, periodosDe, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
+  CORTES, DECISIONES, periodosDe, estadoInstitucional, TEXTO_ESTADO, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
   decisionSugerida, guardarConfig, periodosIncompletos, areasCalificadasUltimoPeriodo, esPosibleDesertor, normalizarDecision,
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
   importarListaEstados, normalizarNombre, comisionDe, leerComisiones, guardarComisiones,
@@ -74,6 +74,64 @@ function imprimirListas(
     comisiones ? g => bloqueFirmas(comisiones.find(c => c.id === comisionDe(g))) : undefined,
     opciones);
   abrirVentana(titulo, html, PRINT_CSS + CSS_EXTRA);
+}
+
+/** Reporte INTERNO de las ayudas (notas ajustadas en preconsejo/comisión):
+ *  quién, qué área, de qué nota a cuál y cómo cambió su estado. Es lo único
+ *  impreso que muestra los ajustes; no forma parte del acta. */
+function imprimirAyudas(porGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo, etiquetaFiltro: string): void {
+  const color: Record<EstadoInstitucional, string> = {
+    APROBADO: '#c6efce', CURSANDO: '#ffd9a0', REPROBADO: '#ffa7a7', RETIRADO: '#ffff00',
+  };
+  const txt = (e: EstadoInstitucional) => (e === 'CURSANDO' ? 'NIVELAR' : TEXTO_ESTADO[e]);
+  const celda = (e: EstadoInstitucional) => `<td class="c" style="background:${color[e]};font-weight:bold">${txt(e)}</td>`;
+
+  const filas: { g: GrupoConsejo; f: Fila; antes: EstadoInstitucional; despues: EstadoInstitucional; perdAntes: number }[] = [];
+  for (const [g, fs] of porGrupo) {
+    for (const f of fs) {
+      if (f.an.ajustadas.length === 0) continue;
+      // Estado que tendría SIN la ayuda (misma regla, sin los ajustes)
+      const sin = analizar(f.est, g, corte, cfg);
+      const retirado = f.retiradoDiario || !!f.retiradoLista;
+      const antes = estadoInstitucional(retirado ? 'RETIRADO' : decisionSugerida(sin, corte, cfg, f.desertor));
+      filas.push({ g, f, antes, despues: estadoInstitucional(f.decision), perdAntes: sin.perdidas.length });
+    }
+  }
+  if (filas.length === 0) { alert('Todavía no hay estudiantes con ayudas (notas ajustadas) en los grupos seleccionados.'); return; }
+
+  const nAreas = filas.reduce((s, x) => s + x.f.an.ajustadas.length, 0);
+  const cambios = new Map<string, number>();
+  for (const x of filas) {
+    const k = x.antes === x.despues ? `Sigue en ${txt(x.despues)}` : `${txt(x.antes)} → ${txt(x.despues)}`;
+    cambios.set(k, (cambios.get(k) ?? 0) + 1);
+  }
+  const resumen = `<table style="width:auto;margin-bottom:10px"><thead><tr><th>Cambio de estado</th><th>Estudiantes</th></tr></thead><tbody>
+    ${[...cambios.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="c">${n}</td></tr>`).join('')}
+    <tr><th style="text-align:left">Total</th><th>${filas.length} estudiantes · ${nAreas} áreas ajustadas</th></tr></tbody></table>`;
+
+  const cuerpo = filas.map((x, i) => {
+    const aj = x.f.an.ajustadas;
+    return aj.map((a, k) => `<tr>
+      ${k === 0 ? `<td class="num" rowspan="${aj.length}">${i + 1}</td>
+        <td class="c" rowspan="${aj.length}">${esc(x.g.nombre)}</td>
+        <td rowspan="${aj.length}">${esc(x.f.est.nombre)}</td>` : ''}
+      <td>${esc(nombreArea(a.area))}</td>
+      <td class="c perd">${fmt(a.original)}</td><td class="c" style="font-weight:bold">${fmt(a.nota)}</td>
+      ${k === 0 ? `<td class="c" rowspan="${aj.length}">${x.perdAntes} → ${x.f.an.perdidas.length}</td>
+        ${celda(x.antes).replace('<td', `<td rowspan="${aj.length}"`)}${celda(x.despues).replace('<td', `<td rowspan="${aj.length}"`)}
+        <td rowspan="${aj.length}" style="font-size:9px">${esc(x.f.guardada?.observacion ?? '')}</td>` : ''}
+    </tr>`).join('');
+  }).join('');
+
+  abrirVentana('Reporte de ayudas (interno)',
+    `<div style="border:2px solid #991b1b;color:#991b1b;font-weight:bold;text-align:center;padding:4px;margin-bottom:8px;font-size:11px">
+       USO INTERNO — NO FORMA PARTE DEL ACTA</div>` +
+    reportEncabezado('Reporte de ayudas del preconsejo y las comisiones', etiquetaCorte(corte), etiquetaFiltro, false) +
+    resumen +
+    `<table><thead><tr><th class="num">#</th><th>Grupo</th><th>Estudiante</th><th>Área ayudada</th><th>Nota original</th><th>Nota ajustada</th>
+       <th>Áreas perdidas</th><th>Estado sin ayuda</th><th>Estado con ayuda</th><th>Observación</th></tr></thead>
+     <tbody>${cuerpo}</tbody></table>`,
+    PRINT_CSS + CSS_EXTRA.replace('portrait', 'landscape'));
 }
 
 function imprimirRecuperaciones(filasPorGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo): void {
@@ -528,7 +586,13 @@ export function ConsejoView() {
                 { estados: estadosActa, textos: { CURSANDO: 'NIVELAR' } })}
               className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Acta de la comisión (por grado)</button>
           )}
-          {etapa === 'RESULTADOS' && (
+          {etapa === 'COMISIONES' && (
+            <button onClick={() => imprimirListas('BORRADOR para revisión de la comisión', todasPorGrupo, corte, cfg, null,
+                { estados: estadosActa, textos: { CURSANDO: 'NIVELAR' }, borrador: true })}
+              title="Mismo formato del acta, sin firmas y marcado BORRADOR: para que la comisión revise y decida cambios antes del acta final."
+              className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-semibold shadow hover:bg-amber-700">📝 Borrador para la comisión (sin firmas)</button>
+          )}
+          {(etapa === 'RESULTADOS' || etapa === 'COMISIONES') && (
             <span className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
               En el acta:
               {([['REPROBADO', 'Reprobados'], ['CURSANDO', 'Nivelar'], ['RETIRADO', 'Desertados/retirados'], ['APROBADO', 'Aprobados']] as const).map(([e, t]) => (
@@ -553,6 +617,11 @@ export function ConsejoView() {
               ✓ Aplicar sugeridas a los pendientes
             </button>
           )}
+          <button
+            onClick={() => imprimirAyudas(todasPorGrupo, corte, cfg,
+              comSel === 'TODAS' ? 'Todas las comisiones' : `Comisión ${comisiones.find(c => c.id === comSel)?.nombre ?? ''}`)}
+            title="Reporte interno: estudiantes ayudados, área, nota original → ajustada y cambio de estado. No forma parte del acta."
+            className="px-4 py-2 rounded-xl bg-violet-700 text-white text-xs font-semibold shadow hover:bg-violet-800">🔒 Reporte de ayudas (interno)</button>
           <span className="text-xs text-slate-500 self-center">
             {nCasos} con áreas perdidas · {[...filasPorGrupo.values()].flat().filter(f => f.an.ajustadas.length > 0).length} con notas ajustadas · {etiquetaCorte(corte)}
           </span>
