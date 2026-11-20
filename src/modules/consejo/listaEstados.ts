@@ -172,18 +172,31 @@ const COLOR: Record<EstadoInstitucional, string> = {
 };
 const escHtml = (s: string) => s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));
 
+export interface OpcionesImpresion {
+  /** Estados que salen; los demás se omiten (p. ej. el acta sin aprobados). */
+  estados?: EstadoInstitucional[];
+  /** Texto a mostrar por estado (p. ej. CURSANDO → NIVELAR en el acta). */
+  textos?: Partial<Record<EstadoInstitucional, string>>;
+}
+
 export function htmlListas(
   porGrupo: Map<GrupoConsejo, EntradaLista[]>, corte: Corte, cfg: ConfigConsejo,
   encabezado: (g: GrupoConsejo) => string,
   pie?: (g: GrupoConsejo) => string,   // p. ej. firmas de la comisión
+  opciones: OpcionesImpresion = {},
 ): string {
-  return construirListas(porGrupo, corte, cfg).map(({ grupo, filas }, idx) => {
-    const cuerpo = filas.map((f, i) => {
+  const texto = (e: EstadoInstitucional) => opciones.textos?.[e] ?? TEXTO_ESTADO[e];
+  const incluidos = opciones.estados ?? ESTADOS;
+  return construirListas(porGrupo, corte, cfg).map(({ grupo, filas: todas }, idx) => {
+    const filas = todas.filter(f => incluidos.includes(f.estado));
+    const cuerpo = filas.length === 0
+      ? `<tr><td colspan="8" class="c" style="padding:10px;color:#555">Ningún estudiante en ${incluidos.map(texto).join(' / ')}.</td></tr>`
+      : filas.map((f, i) => {
       const bloques = f.areas.map(a => Math.max(1, a.asigs.length));
       const alto = Math.max(1, bloques.reduce((s, n) => s + n, 0));
       const cab = `<td class="num" rowspan="${alto}">${i + 1}</td>
         <td rowspan="${alto}" style="background:${COLOR[f.estado]}">${escHtml(f.nombre)}</td>
-        <td class="c" rowspan="${alto}" style="background:${COLOR[f.estado]};font-weight:bold">${TEXTO_ESTADO[f.estado]}</td>`;
+        <td class="c" rowspan="${alto}" style="background:${COLOR[f.estado]};font-weight:bold">${texto(f.estado)}</td>`;
       const obs = `<td rowspan="${alto}" style="font-size:9px;color:#333">${escHtml(f.observacion)}</td>`;
       if (f.areas.length === 0) return `<tr>${cab}<td></td><td></td><td></td><td></td>${obs}</tr>`;
       const trs: string[] = [];
@@ -198,7 +211,7 @@ export function htmlListas(
       });
       return trs.join('');
     }).join('');
-    const conteo = ESTADOS.map(e => `${TEXTO_ESTADO[e]}: ${filas.filter(f => f.estado === e).length}`).join(' · ');
+    const conteo = incluidos.map(e => `${texto(e)}: ${filas.filter(f => f.estado === e).length}`).join(' · ');
     return `<div class="${idx > 0 ? 'pg' : ''}">
       ${encabezado(grupo)}
       <table><thead><tr><th class="num">#</th><th>Apellidos y nombres</th><th>Estado</th><th>Área</th><th>Nota</th><th>Asignatura</th><th>Nota</th><th>Observación</th></tr></thead>

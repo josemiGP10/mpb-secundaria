@@ -8,7 +8,7 @@ import {
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
   importarListaEstados, normalizarNombre, comisionDe, leerComisiones, guardarComisiones,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
-  type EstudianteConsejo, type GrupoConsejo, type Comision,
+  type EstudianteConsejo, type GrupoConsejo, type Comision, type EstadoInstitucional,
 } from './consejoService';
 
 /** Etapas del proceso: preconsejo interno → comisiones → resultados para firma. */
@@ -18,7 +18,7 @@ const ETAPAS: { id: Etapa; titulo: string; ayuda: string }[] = [
   { id: 'COMISIONES', titulo: '2 · Comisiones', ayuda: 'Cada comisión revisa sus grados. A quien perdió 3 o más áreas se le puede corregir una nota (y pasa a recuperar) o confirmar que pierde el año.' },
   { id: 'RESULTADOS', titulo: '3 · Resultados', ayuda: 'Listados finales por grado con las firmas de los miembros de cada comisión.' },
 ];
-import { descargarListaExcel, htmlListas } from './listaEstados';
+import { descargarListaExcel, htmlListas, type OpcionesImpresion } from './listaEstados';
 
 const etiquetaCorte = (c: Corte) => (c === 'FINAL' ? 'Nota final del año' : `Período ${c.slice(2)}`);
 const esc = (s: string) => s.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));
@@ -65,12 +65,14 @@ function bloqueFirmas(com: Comision | undefined): string {
 function imprimirListas(
   titulo: string, porGrupo: Map<GrupoConsejo, Fila[]>, corte: Corte, cfg: ConfigConsejo,
   comisiones: Comision[] | null,   // con comisiones → resultados para firma
+  opciones: OpcionesImpresion = {},
 ): void {
   if (porGrupo.size === 0) { alert('No hay grupos con los filtros actuales.'); return; }
   const html = htmlListas(porGrupo, corte, cfg,
     g => reportEncabezado(`${titulo} — ${g.nombre}`, etiquetaCorte(corte),
       comisiones ? `Comisión ${comisiones.find(c => c.id === comisionDe(g))?.nombre ?? ''}` : '', false),
-    comisiones ? g => bloqueFirmas(comisiones.find(c => c.id === comisionDe(g))) : undefined);
+    comisiones ? g => bloqueFirmas(comisiones.find(c => c.id === comisionDe(g))) : undefined,
+    opciones);
   abrirVentana(titulo, html, PRINT_CSS + CSS_EXTRA);
 }
 
@@ -138,6 +140,15 @@ export function ConsejoView() {
   const [fileLista, setFileLista]     = useState<File | null>(null);
   const [msgLista, setMsgLista]       = useState<string | null>(null);
   const cambiarComisiones = (c: Comision[]) => { setComisiones(c); guardarComisiones(c); };
+  // Estados que salen en el acta de la comisión (por defecto: reprobados y a nivelar)
+  const [estadosActa, setEstadosActa] = useState<EstadoInstitucional[]>(() => {
+    try { const r = localStorage.getItem('mpb_sec_consejo_estados_acta'); if (r) return JSON.parse(r); } catch { /* sin almacenamiento */ }
+    return ['REPROBADO', 'CURSANDO'];
+  });
+  const cambiarEstadosActa = (e: EstadoInstitucional[]) => {
+    setEstadosActa(e);
+    try { localStorage.setItem('mpb_sec_consejo_estados_acta', JSON.stringify(e)); } catch { /* sin almacenamiento */ }
+  };
 
   const data = useLiveQuery(() => db.consejo_import.get('actual'), []);
   const decisiones = useLiveQuery(
@@ -513,8 +524,21 @@ export function ConsejoView() {
               className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Listado para el consejo</button>
           )}
           {etapa === 'RESULTADOS' && (
-            <button onClick={() => imprimirListas('Resultados de evaluación y promoción', todasPorGrupo, corte, cfg, comisiones)}
-              className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Resultados para firma (por grado)</button>
+            <button onClick={() => imprimirListas('Resultados de evaluación y promoción', todasPorGrupo, corte, cfg, comisiones,
+                { estados: estadosActa, textos: { CURSANDO: 'NIVELAR' } })}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold shadow hover:bg-blue-700">🖨 Acta de la comisión (por grado)</button>
+          )}
+          {etapa === 'RESULTADOS' && (
+            <span className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+              En el acta:
+              {([['REPROBADO', 'Reprobados'], ['CURSANDO', 'Nivelar'], ['RETIRADO', 'Desertados/retirados'], ['APROBADO', 'Aprobados']] as const).map(([e, t]) => (
+                <label key={e} className="flex items-center gap-1">
+                  <input type="checkbox" checked={estadosActa.includes(e)}
+                    onChange={ev => cambiarEstadosActa(ev.target.checked ? [...estadosActa, e] : estadosActa.filter(x => x !== e))} />
+                  {t}
+                </label>
+              ))}
+            </span>
           )}
           <button onClick={() => descargarListaExcel(todasPorGrupo, corte, cfg)}
             title="Formato institucional (como el de primaria): APROBADO, CURSANDO, REPROBADO, DESERTADO/RETIRADO. Una hoja por grupo."
