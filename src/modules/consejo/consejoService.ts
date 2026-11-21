@@ -142,8 +142,8 @@ export const NOMBRE_AREA: Record<string, string> = {
   EPL:    'Raíces Socioafectivas (EPL)',
   MATE:   'Matemáticas',
   TECINF: 'Tecnología e Informática',
-  DC:     'Dimensión DC (preescolar)',
-  SA:     'Dimensión SA (preescolar)',
+  DC:     'Dimensión Comunicativa',
+  SA:     'Dimensión Socioafectiva',
   RU:     'Ética y Religión',
   SOC:    'Ciencias Sociales',
 };
@@ -701,10 +701,23 @@ export const COMISIONES_DEFAULT: Comision[] = [
     { rol: 'Padre grado 11°', nombre: 'DOLKIS MORA' },
     { rol: 'Padre grado MEF 10°/11°', nombre: 'SOREYIS BERRIO' },
   ] },
+  // Sede El Limonal: comisión propia. Nombres pendientes (se llenan en la
+  // app o a mano en el acta impresa).
+  { id: 'C6', nombre: 'Sede El Limonal', miembros: [
+    { rol: 'Docente consejo académico', nombre: '' },
+    { rol: 'Docente representante rector', nombre: '' },
+    { rol: 'Padre educación inicial', nombre: '' },
+    { rol: 'Padre grado 1°', nombre: '' },
+    { rol: 'Padre grado 2°', nombre: '' },
+    { rol: 'Padre grado 3°', nombre: '' },
+    { rol: 'Padre grado 4°', nombre: '' },
+    { rol: 'Padre grado 5°', nombre: '' },
+  ] },
 ];
 
-/** A qué comisión pertenece un grupo (por grado; MEF = 20 + primer grado). */
+/** A qué comisión pertenece un grupo (por sede y grado; MEF = 20 + primer grado). */
 export function comisionDe(grupo: GrupoConsejo): string {
+  if (grupo.sede === 'LIMONAL') return 'C6';
   const g = grupo.grado;
   if (g <= 2) return 'C1';
   if (g <= 5.5) return 'C2';            // 3°, 4°, 5° y Aceleración (5.5)
@@ -717,7 +730,11 @@ const COM_KEY = 'mpb_sec_consejo_comisiones';
 export function leerComisiones(): Comision[] {
   try {
     const raw = localStorage.getItem(COM_KEY);
-    return raw ? JSON.parse(raw) as Comision[] : COMISIONES_DEFAULT;
+    if (!raw) return COMISIONES_DEFAULT;
+    // Las guardadas conservan sus nombres; se agregan las comisiones nuevas
+    // que no existían cuando se guardaron (p. ej. El Limonal).
+    const guardadas = JSON.parse(raw) as Comision[];
+    return [...guardadas, ...COMISIONES_DEFAULT.filter(c => !guardadas.some(g => g.id === c.id))];
   } catch { return COMISIONES_DEFAULT; }
 }
 export function guardarComisiones(c: Comision[]): void {
