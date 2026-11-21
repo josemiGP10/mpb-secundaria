@@ -6,7 +6,7 @@ import {
   CORTES, DECISIONES, periodosDe, estadoInstitucional, TEXTO_ESTADO, analizar, areasARecuperar, asignaturasDeArea, conRecuperacion,
   decisionSugerida, guardarConfig, periodosIncompletos, areasCalificadasUltimoPeriodo, esPosibleDesertor, normalizarDecision,
   guardarDecision, idDecision, importarConsolidados, labelDecision, leerConfig, nombreArea, buscarEnDiario, construirIndiceDiario,
-  importarListaEstados, normalizarNombre, comisionDe, leerComisiones, guardarComisiones,
+  importarListaEstados, normalizarNombre, comisionDe, sedeDe, esPreescolar, NOMBRE_SEDE, type Sede, leerComisiones, guardarComisiones,
   type Analisis, type ConfigConsejo, type Corte, type Decision, type DecisionConsejo,
   type EstudianteConsejo, type GrupoConsejo, type Comision, type EstadoInstitucional,
 } from './consejoService';
@@ -193,6 +193,8 @@ export function ConsejoView() {
   const [mostrarRetirados, setMostrarRetirados] = useState(false);
   const [etapa, setEtapa]             = useState<Etapa>('PRECONSEJO');
   const [comSel, setComSel]           = useState<string>('TODAS');
+  const [sedeSel, setSedeSel]         = useState<'TODAS' | Sede>('TODAS');
+  const [sedeImport, setSedeImport]   = useState<Sede>('PRINCIPAL');
   const [soloPierden, setSoloPierden] = useState(false);
   const [comisiones, setComisiones]   = useState<Comision[]>(leerComisiones);
   const [fileLista, setFileLista]     = useState<File | null>(null);
@@ -242,6 +244,7 @@ export function ConsejoView() {
     for (const g of data.grupos) {
       if (grupoSel !== 'TODOS' && g.clave !== grupoSel) continue;
       if (comSel !== 'TODAS' && comisionDe(g) !== comSel) continue;
+      if (sedeSel !== 'TODAS' && sedeDe(g) !== sedeSel) continue;
       const ult = areasCalificadasUltimoPeriodo(g);
       const filas: Fila[] = [], completas: Fila[] = [];
       for (const est of g.estudiantes) {
@@ -259,7 +262,10 @@ export function ConsejoView() {
           porNotas ? `en el último período tiene 2.0 o menos (o sin nota) en la mitad o más de las áreas` : '',
           asis ? `en las últimas 4 semanas del diario faltó a ${asis.fallas} de ${asis.total} clases` : '',
         ].filter(Boolean).join('; ');
-        const sugerida = retirado ? 'RETIRADO' : decisionSugerida(an, corte, cfg, desertor);
+        // Preescolar no reprueba: aprobado salvo retiro o deserción
+        const sugerida = retirado ? 'RETIRADO'
+          : esPreescolar(g) ? (desertor || an.sinNingunaNota ? 'RETIRADO' : 'PROMOVIDO')
+          : decisionSugerida(an, corte, cfg, desertor);
         const fila: Fila = {
           grupo: g, est, an, sugerida, retiradoDiario, retiradoLista, desertor, motivoDesercion, nombreDiario: enDiario, guardada,
           decision: guardada?.decision ? normalizarDecision(guardada.decision) : sugerida,
@@ -272,7 +278,7 @@ export function ConsejoView() {
       todas.set(g, completas);
     }
     return { filasPorGrupo: mapa, todasPorGrupo: todas, nRetiradosOcultos: ocultos };
-  }, [data, decisiones, grupoSel, comSel, corte, cfg, indiceDiario, mostrarRetirados]);
+  }, [data, decisiones, grupoSel, comSel, sedeSel, corte, cfg, indiceDiario, mostrarRetirados]);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toUpperCase();
@@ -288,7 +294,7 @@ export function ConsejoView() {
     if (!fileAreas || importando) return;
     setImportando(true); setError(null);
     try {
-      await importarConsolidados(fileAreas, fileAsig, reemplazarTodo);
+      await importarConsolidados(fileAreas, fileAsig, reemplazarTodo, sedeImport);
       setMostrarImport(false); setFileAreas(null); setFileAsig(null); setReemplazarTodo(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -340,6 +346,15 @@ export function ConsejoView() {
         <p className="text-xs text-slate-500 mt-0.5">
           Los Excel que exporta la plataforma de notas. Se leen en este equipo; no se suben a ningún lado.
         </p>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-slate-700">
+        <b>Sede de estos archivos:</b>
+        {(['PRINCIPAL', 'LIMONAL'] as Sede[]).map(s => (
+          <label key={s} className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${sedeImport === s ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+            <input type="radio" name="sedeImport" checked={sedeImport === s} onChange={() => setSedeImport(s)} />
+            {NOMBRE_SEDE[s]}
+          </label>
+        ))}
       </div>
       <label className="text-xs text-slate-600 flex flex-col gap-1">
         <span><b>1. Consolidado por áreas</b> (obligatorio) — consolidadoGruposAreasExcel</span>
@@ -434,6 +449,14 @@ export function ConsejoView() {
         </div>
         <p className="text-[11px] text-slate-500 -mt-0.5">{ETAPAS.find(x => x.id === etapa)!.ayuda}</p>
         <div className="flex gap-1.5 flex-wrap items-center">
+          {data.grupos.some(g => sedeDe(g) === 'LIMONAL') && (
+            <select value={sedeSel} onChange={e => { setSedeSel(e.target.value as 'TODAS' | Sede); setGrupoSel('TODOS'); }}
+              className="bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5 font-semibold">
+              <option value="TODAS">Todas las sedes</option>
+              <option value="PRINCIPAL">{NOMBRE_SEDE.PRINCIPAL}</option>
+              <option value="LIMONAL">{NOMBRE_SEDE.LIMONAL}</option>
+            </select>
+          )}
           <select value={comSel} onChange={e => { setComSel(e.target.value); setGrupoSel('TODOS'); }}
             className="bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5">
             <option value="TODAS">Todas las comisiones</option>
@@ -442,7 +465,7 @@ export function ConsejoView() {
           <select value={grupoSel} onChange={e => setGrupoSel(e.target.value)}
             className="bg-white border border-slate-300 text-slate-900 text-xs rounded-lg px-2 py-1.5">
             <option value="TODOS">Todos los grupos</option>
-            {data.grupos.filter(g => comSel === 'TODAS' || comisionDe(g) === comSel)
+            {data.grupos.filter(g => (comSel === 'TODAS' || comisionDe(g) === comSel) && (sedeSel === 'TODAS' || sedeDe(g) === sedeSel))
               .map(g => <option key={g.clave} value={g.clave}>{g.nombre}</option>)}
           </select>
           <div className="flex rounded-lg border border-slate-200 overflow-hidden">

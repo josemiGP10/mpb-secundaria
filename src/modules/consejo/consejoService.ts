@@ -27,6 +27,8 @@ export interface GrupoConsejo {
   clave: string;        // nombre tal cual viene ("Sexto A Unica")
   nombre: string;       // legible ("6° A")
   grado: number;
+  /** Sede: la principal o El Limonal (se elige al cargar los archivos). */
+  sede?: Sede;
   /** Períodos que usa el grupo: 4 regulares, 2 (semestres) en MEF y
    *  Aceleración. Se deduce de qué períodos traen notas. */
   numPeriodos?: number;
@@ -36,6 +38,12 @@ export interface GrupoConsejo {
 }
 
 export const periodosDe = (g: GrupoConsejo): Corte[] => PERIODOS.slice(0, g.numPeriodos ?? 4);
+
+export type Sede = 'PRINCIPAL' | 'LIMONAL';
+export const NOMBRE_SEDE: Record<Sede, string> = { PRINCIPAL: 'Sede principal', LIMONAL: 'El Limonal' };
+export const sedeDe = (g: GrupoConsejo): Sede => g.sede ?? 'PRINCIPAL';
+/** Preescolar (Jardín, Transición) no reprueba: se evalúa sin promoción. */
+export const esPreescolar = (g: GrupoConsejo) => g.grado < 1;
 
 export interface ImportConsejo {
   id: 'actual';
@@ -127,6 +135,15 @@ export const NOMBRE_AREA: Record<string, string> = {
   INFOR:  'Informática y Tecnología',
   MAT:    'Matemáticas',
   MOT:    'Ejes Movilizadores',
+  // Sede El Limonal (otros códigos de la plataforma)
+  CNS:    'Ciencias Naturales',
+  CSOC:   'Ciencias Sociales',
+  EDUART: 'Educación Artística',
+  EPL:    'Raíces Socioafectivas (EPL)',
+  MATE:   'Matemáticas',
+  TECINF: 'Tecnología e Informática',
+  DC:     'Dimensión DC (preescolar)',
+  SA:     'Dimensión SA (preescolar)',
   RU:     'Ética y Religión',
   SOC:    'Ciencias Sociales',
 };
@@ -147,6 +164,9 @@ export const NOMBRE_ASIGNATURA: Record<string, string> = {
   E2: 'Eje Deporte y Recreación', ECIYT: 'Eje Ciencia y Tecnología', ECLUB: 'Eje Club de Lectura',
   EJARY: 'Eje Arte y Cultura', EJTUR: 'Eje Turismo', Ej: 'Eje Movilizador',
   AFROC: 'Afrocolombianidad', ERyP: 'Ética y Religión', Raice: 'Raíces', RSoci: 'Raíces Socioafectivas',
+  // El Limonal ('13682' es como la plataforma exporta Ciencias Sociales en esa sede)
+  '13682': 'Ciencias Sociales', EDUFI: 'Educación Física',
+  COGN: 'Cognitiva', COM: 'Comunicativa', CORP: 'Corporal', ESTE: 'Estética',
   SOC: 'Ciencias Sociales', CCIU: 'Competencias Ciudadanas', GEOG: 'Geografía', HIST: 'Historia',
   CYECO: 'Ciencias Económicas y Políticas', FIL: 'Filosofía', PPP: 'Proyecto Pedagógico Productivo',
 };
@@ -158,20 +178,24 @@ export const nombreAsignatura = (c: string) => NOMBRE_ASIGNATURA[c] ?? c;
 // Si una asignatura puede caer en dos áreas según el grado, se
 // toma la primera que exista en el grupo.
 const AREA_DE_ASIGNATURA: Record<string, string[]> = {
-  NAT: ['CNAT'], PFQ: ['CNAT'], BIOLO: ['CNAT'], FISIC: ['CNAT'], QUIM: ['CNAT'],
-  ART: ['EA', 'ART'], ART1: ['ART', 'EA'], EMPR: ['EA'],
-  EFIS: ['EDUFIS'],
+  NAT: ['CNAT', 'CNS'], PFQ: ['CNAT'], BIOLO: ['CNAT'], FISIC: ['CNAT'], QUIM: ['CNAT'],
+  ART: ['EA', 'ART', 'EDUART'], ART1: ['ART', 'EA', 'EDUART'], EMPR: ['EA'],
+  EFIS: ['EDUFIS'], EDUFI: ['EDUFIS'],
   'C TEX': ['HUM', 'HLCI'], 'L CAS': ['HUM', 'HLCI'], 'L EXT': ['HUM', 'HLCI'], 'OR CA': ['HUM', 'HLCI'],
   LCAST: ['HLCI', 'HUM'], LEXTR: ['HLCI', 'HUM'], LCRIT: ['HUM', 'HLCI'],
-  'I Y T': ['INFOR'],
-  MAT: ['MAT'], RESPR: ['MAT'], 'E Y G': ['MAT'], GEOM: ['MAT'], EST: ['MAT'],
+  'I Y T': ['INFOR', 'TECINF'],
+  MAT: ['MAT', 'MATE'], RESPR: ['MAT', 'MATE'], 'E Y G': ['MAT'], GEOM: ['MAT'], EST: ['MAT'],
   E2: ['MOT'], ECIYT: ['MOT'], ECLUB: ['MOT'], EJARY: ['MOT'], EJTUR: ['MOT'], Ej: ['MOT'],
   AFROC: ['RU'], ERyP: ['RU'],
   SOC: ['SOC'], CCIU: ['SOC'], GEOG: ['SOC'], HIST: ['SOC'], CYECO: ['SOC'], FIL: ['SOC'],
   // MEF y Aceleración
   PPP: ['SOC'], QUYBI: ['CNAT'], Raice: ['RU'],
   // Primaria
-  RSoci: ['RU'],
+  RSoci: ['RU', 'EPL'],
+  // El Limonal
+  '13682': ['CSOC'],
+  // Preescolar (El Limonal): dimensiones
+  COM: ['DC'], ESTE: ['DC'], COGN: ['SA'], CORP: ['SA'], SA: ['SA'],
 };
 
 export function asignaturasDeArea(grupo: GrupoConsejo, area: string): string[] {
@@ -198,6 +222,9 @@ function nombreGrupo(raw: string): { nombre: string; grado: number } {
     return { nombre: `MEF ${nums.join('-')}`, grado: 20 + Number(nums[0] ?? 0) };
   }
   if (/^aceleraci/i.test(limpio)) return { nombre: 'Aceleración', grado: 5.5 };
+  // Preescolar (como lo exporta El Limonal: "Jardin I o A o Kinder JARDIN Mañana")
+  if (/^jard[ií]n/i.test(limpio)) return { nombre: 'Jardín', grado: -1 };
+  if (/^transici/i.test(limpio)) return { nombre: 'Transición', grado: 0 };
   for (const [re, g] of GRADOS) {
     if (re.test(limpio)) {
       const letra = limpio.split(' ')[1] ?? '';
@@ -378,7 +405,7 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
       continue;
     }
     if (!g) continue;
-    const corte = typeof r[5] === 'string' ? r[5].trim().toUpperCase() : '';
+    const corte = normalizarCorte(typeof r[5] === 'string' ? r[5] : '');
     if (!(CORTES as readonly string[]).includes(corte) && corte !== 'ACUM') continue;
     // Cada estudiante empieza en la fila que trae su nombre. Según el estado
     // de la plataforma, esa primera fila es FINAL, ACUM (acumulado, en MEF
@@ -401,6 +428,15 @@ function parsearConsolidado(filas: Celda[][]): GrupoLeido[] {
   return grupos;
 }
 
+/** Nombre del corte. La sede principal exporta P.1…P.4; El Limonal exporta
+ *  PP1, PP2, TP3, CP4 (primer, segundo, tercer, cuarto período). */
+function normalizarCorte(raw: string): string {
+  const c = raw.trim().toUpperCase();
+  if (/^P\.\d$/.test(c) || c === 'FINAL' || c === 'ACUM') return c;
+  const m = /^[A-Z]{1,3}(\d)$/.exec(c);
+  return m ? `P.${m[1]}` : c;
+}
+
 /** Nota final cuando la plataforma aún no la genera: promedio de los
  *  períodos que tienen nota, truncado a una décima (así coincide con la
  *  oficial en ~87 % de los casos; en el resto difiere unas décimas porque
@@ -418,7 +454,7 @@ function calcularFinal(notas: Partial<Record<Corte, Notas>>, cols: string[], per
  *  ya cargados (los regulares y los MEF vienen en archivos distintos);
  *  un grupo que ya existía se reemplaza por la versión nueva. */
 export async function importarConsolidados(
-  fileAreas: File, fileAsig: File | null, reemplazarTodo = false,
+  fileAreas: File, fileAsig: File | null, reemplazarTodo = false, sede: Sede = 'PRINCIPAL',
 ): Promise<ImportConsejo> {
   const areas = parsearConsolidado(await leerPrimeraHoja(fileAreas));
   if (areas.length === 0) throw new Error('No se encontraron grupos en el consolidado de áreas. ¿Es el archivo correcto?');
@@ -435,7 +471,11 @@ export async function importarConsolidados(
     });
     const pers = PERIODOS.slice(0, numPeriodos || 4);
     return {
-      clave: ga.clave, nombre, grado, numPeriodos: numPeriodos || 4,
+      // En El Limonal la clave lleva la sede, para no chocar nunca con un
+      // grupo de la sede principal (y sus decisiones guardadas).
+      clave: sede === 'LIMONAL' ? `LIMONAL · ${ga.clave}` : ga.clave,
+      nombre: sede === 'LIMONAL' ? `${nombre} · Limonal` : nombre,
+      grado, sede, numPeriodos: numPeriodos || 4,
       areas: ga.cols,
       asignaturas: gs?.cols ?? [],
       estudiantes: [...ga.est.entries()].map(([n, leidas]) => {
