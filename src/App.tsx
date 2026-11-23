@@ -5,8 +5,36 @@ import { AsistenciaView } from './modules/asistencia/AsistenciaView';
 import { SecuenciasView } from './modules/secuencias/SecuenciasView';
 import { ReportesView } from './modules/reportes/ReportesView';
 import { ConsejoView } from './modules/consejo/ConsejoView';
+import { GruposView } from './modules/grupos/GruposView';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from './db/database';
+import { anioActual, cambiarVigencia, useVigencia } from './lib/vigencia';
 
-type Screen = 'home' | 'asistencia' | 'calificaciones' | 'secuencias' | 'reportes' | 'consejo';
+type Screen = 'home' | 'asistencia' | 'calificaciones' | 'secuencias' | 'reportes' | 'consejo' | 'grupos';
+
+/** Selector de vigencia del encabezado: años con grupos + actual y próximo. */
+function SelectorVigencia({ onIrAGrupos }: { onIrAGrupos: () => void }) {
+  const anio = useVigencia();
+  const actual = anioActual();
+  const conGrupos = useLiveQuery(async () => {
+    const anios = new Set<number>();
+    await db.grupos.each(g => { anios.add(g.anio); });
+    return anios;
+  }, []) ?? new Set<number>();
+  const opciones = [...new Set([...conGrupos, actual, actual + 1, anio])].sort((a, b) => a - b);
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <select value={anio} onChange={e => cambiarVigencia(Number(e.target.value))}
+        title="Año escolar (vigencia) con el que trabaja la app"
+        className={`text-xs font-semibold rounded-lg px-1.5 py-1 border ${anio === actual ? 'bg-white text-slate-800 border-slate-300' : 'bg-amber-100 text-amber-900 border-amber-400'}`}>
+        {opciones.map(a => (
+          <option key={a} value={a}>Año {a}{conGrupos.has(a) ? '' : ' (sin grupos)'}</option>
+        ))}
+      </select>
+      <button onClick={onIrAGrupos} title="Grupos y año escolar" className="text-xs text-blue-700 hover:underline">grupos</button>
+    </div>
+  );
+}
 
 interface NavItem { id: Screen; label: string; icon: string; }
 const NAV_ITEMS: NavItem[] = [
@@ -135,6 +163,8 @@ export function App() {
           </p>
         </div>
 
+        <SelectorVigencia onIrAGrupos={() => setScreen('grupos')} />
+
         {/* Indicador de conexión (informativo, no dispara nada) */}
         <div
           title={enLinea ? 'En línea' : 'Sin conexión a internet'}
@@ -164,6 +194,7 @@ export function App() {
         {screen === 'secuencias'     && <SecuenciasView />}
         {screen === 'reportes'       && <ReportesView />}
         {screen === 'consejo'        && <ConsejoView />}
+        {screen === 'grupos'         && <GruposView />}
       </main>
 
       {/* Nav inferior */}
@@ -227,6 +258,9 @@ function HomeScreen({
         <ActionCard icon="⚖" title="Consejo Académico"
           description="Áreas perdidas por estudiante, decisión de promoción y acta del consejo"
           onClick={() => onNavigate('consejo')} />
+        <ActionCard icon="🗓" title="Grupos y año escolar"
+          description="Cambiar de vigencia y crear los grupos del próximo año (o copiarlos del anterior)"
+          onClick={() => onNavigate('grupos')} />
       </div>
 
       {/* Respaldo manual */}

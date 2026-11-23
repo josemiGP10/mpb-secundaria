@@ -1,3 +1,4 @@
+import { useVigencia } from '@/lib/vigencia';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
@@ -218,13 +219,13 @@ export function ConsejoView() {
   // Índice de la matrícula del diario (la misma de la lista de asistencia)
   // para saber qué estudiantes de la plataforma están retirados y cuáles
   // dejaron de asistir según la asistencia registrada en el diario.
+  const vigencia = useVigencia();
   const indiceDiario = useLiveQuery(async () => {
-    const anio = new Date().getFullYear();
-    const mats = await db.matriculas.where('anio').equals(anio).toArray();
+    const mats = await db.matriculas.where('anio').equals(vigencia).toArray();
     const ests = await db.estudiantes.bulkGet([...new Set(mats.map(m => m.estudiante_id))]);
     const asis = await db.registros_asistencia.where('matricula_id').anyOf(mats.map(m => m.id)).toArray();
     return construirIndiceDiario(mats, new Map(ests.filter(e => !!e).map(e => [e!.id, e!])), asis);
-  }, []);
+  }, [vigencia]);
 
   const cambiarCfg = (c: ConfigConsejo) => { setCfg(c); guardarConfig(c); };
 

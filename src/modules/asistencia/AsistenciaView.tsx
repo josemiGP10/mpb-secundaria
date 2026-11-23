@@ -1,3 +1,4 @@
+import { useVigencia } from '@/lib/vigencia';
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
@@ -42,9 +43,6 @@ function fechaBogota(): string {
 function mesBogota(): number {
   return Number(new Date().toLocaleDateString('en-US', { timeZone: 'America/Bogota', month: 'numeric' }));
 }
-function anioBogota(): number {
-  return Number(new Date().toLocaleDateString('en-US', { timeZone: 'America/Bogota', year: 'numeric' }));
-}
 
 const MESES = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -54,7 +52,7 @@ const MESES = [
 type Vista = 'dia' | 'mes';
 
 export function AsistenciaView() {
-  const anio = anioBogota();
+  const anio = useVigencia();
 
   const [vista,          setVista]          = useState<Vista>('dia');
   const [grupoId,        setGrupoId]        = useState('');

@@ -1,3 +1,4 @@
+import { useVigencia } from '@/lib/vigencia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/database';
@@ -26,7 +27,7 @@ const NOTAS_DISPONIBLES = Array.from({ length: 91 }, (_, i) => (10 + i) / 10);
 type FieldFixed = 'nota_social' | 'nota_personal' | 'prueba_institucional';
 
 export function CalificacionesView() {
-  const anio = new Date().getFullYear();
+  const anio = useVigencia();
 
   const [grupoId,     setGrupoId]     = useState('');
   const [asigId,      setAsigId]      = useState('');

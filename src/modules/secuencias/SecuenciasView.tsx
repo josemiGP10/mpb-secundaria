@@ -1,3 +1,4 @@
+import { useVigencia } from '@/lib/vigencia';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuid } from 'uuid';
@@ -22,7 +23,7 @@ function fechaHoy(): string {
 type Panel = 'lista' | 'nueva' | 'secuencia';
 
 export function SecuenciasView() {
-  const anio = new Date().getFullYear();
+  const anio = useVigencia();
   const [panel,          setPanel]          = useState<Panel>('lista');
   const [grupoId,        setGrupoId]        = useState('');
   const [asignaturaId,   setAsignaturaId]   = useState('');

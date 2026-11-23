@@ -1,3 +1,4 @@
+import { useVigencia } from '@/lib/vigencia';
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getEstudiantesPorGrupo, getEstudiantesRetiradosPorGrupo } from '@/db/database';
@@ -499,7 +500,7 @@ function imprimirMatriculaTotalizado(datos: MatriculaGrupo[], anio: number): voi
 // ── Componente principal ────────────────────────────────────
 
 export function ReportesView() {
-  const anio = new Date().getFullYear();
+  const anio = useVigencia();
 
   const [grupoId,   setGrupoId]   = useState('');
   const [asigId,    setAsigId]    = useState('');
