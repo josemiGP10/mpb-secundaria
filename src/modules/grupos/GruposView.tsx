@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/db/database';
 import { useVigencia, cambiarVigencia, anioActual } from '@/lib/vigencia';
 import type { Area, Asignatura, Grupo } from '@/db/types';
+import { ImportarCargaPanel } from './ImportarCargaPanel';
 
 const GRADOS = [6, 7, 8, 9, 10, 11];
 const LETRAS = ['A', 'B', 'C', 'D', 'E'];
@@ -39,6 +40,7 @@ export function GruposView() {
   const anio = useVigencia();
   const [borrador, setBorrador] = useState<Borrador | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [importando, setImportando] = useState(false);
 
   const grupos      = useLiveQuery(() => db.grupos.where('anio').equals(anio).toArray(), [anio]) ?? [];
   const anteriores  = useLiveQuery(() => db.grupos.where('anio').equals(anio - 1).toArray(), [anio]) ?? [];
@@ -177,7 +179,16 @@ export function GruposView() {
             ⧉ Copiar grupos de {anio - 1} ({anteriores.length}) sin estudiantes
           </button>
         )}
+        <button onClick={() => setImportando(v => !v)}
+          className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow hover:bg-emerald-700">
+          ⬆ Importar carga del horario
+        </button>
       </div>
+
+      {importando && (
+        <ImportarCargaPanel anio={anio} onCerrar={() => setImportando(false)}
+          onListo={m => { setMsg(m); setImportando(false); }} />
+      )}
 
       {borrador && (
         <div className="rounded-2xl bg-white border border-blue-300 p-4 flex flex-col gap-3">
